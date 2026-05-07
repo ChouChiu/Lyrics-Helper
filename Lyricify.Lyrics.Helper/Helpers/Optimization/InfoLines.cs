@@ -254,6 +254,8 @@ namespace Lyricify.Lyrics.Helpers.Optimization
             "宣发",
             "念白",
             "厂牌",
+            "分轨",
+            "贴混",
             "单簧管",
             "萨克斯",
             "打击乐",
