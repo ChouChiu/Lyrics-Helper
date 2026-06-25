@@ -1,3 +1,11 @@
+pub fn format_time_ms_to_timestamp_string(time_ms: f32) -> String {
+    let total_ms = time_ms.max(0.0) as i32;
+    let minute = total_ms / 60000;
+    let second = (total_ms % 60000) / 1000;
+    let ms = total_ms % 1000;
+    format!("{:02}:{:02}.{:03}", minute, second, ms)
+}
+
 pub fn is_number(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
 }

@@ -49,7 +49,7 @@ pub fn generate_with_options(
                     if let Some(st) = start_time {
                         result.push_str(&format!(
                             "[{}]{}\n",
-                            crate::helpers::string_helper::format_time_ms_to_timestamp_string(st as f32),
+                            lyrics_core::helpers::string_helper::format_time_ms_to_timestamp_string(st as f32),
                             text
                         ));
 
@@ -58,7 +58,7 @@ pub fn generate_with_options(
                             if let Some(et) = end_time {
                                 result.push_str(&format!(
                                     "[{}]\n",
-                                    crate::helpers::string_helper::format_time_ms_to_timestamp_string(et as f32)
+                                    lyrics_core::helpers::string_helper::format_time_ms_to_timestamp_string(et as f32)
                                 ));
                             }
                         }
@@ -73,7 +73,7 @@ pub fn generate_with_options(
                         if let Some(st) = sub_start {
                             result.push_str(&format!(
                                 "[{}]{}\n",
-                                crate::helpers::string_helper::format_time_ms_to_timestamp_string(st as f32),
+                                lyrics_core::helpers::string_helper::format_time_ms_to_timestamp_string(st as f32),
                                 sub_text
                             ));
 
@@ -81,7 +81,7 @@ pub fn generate_with_options(
                                 if let Some(et) = sub_end {
                                     result.push_str(&format!(
                                         "[{}]\n",
-                                        crate::helpers::string_helper::format_time_ms_to_timestamp_string(et as f32)
+                                        lyrics_core::helpers::string_helper::format_time_ms_to_timestamp_string(et as f32)
                                     ));
                                 }
                             }
@@ -96,7 +96,7 @@ pub fn generate_with_options(
                     if let Some(st) = start_time {
                         result.push_str(&format!(
                             "[{}]{}\n",
-                            crate::helpers::string_helper::format_time_ms_to_timestamp_string(st as f32),
+                            lyrics_core::helpers::string_helper::format_time_ms_to_timestamp_string(st as f32),
                             text
                         ));
 
@@ -104,7 +104,7 @@ pub fn generate_with_options(
                             if let Some(et) = end_time {
                                 result.push_str(&format!(
                                     "[{}]\n",
-                                    crate::helpers::string_helper::format_time_ms_to_timestamp_string(et as f32)
+                                    lyrics_core::helpers::string_helper::format_time_ms_to_timestamp_string(et as f32)
                                 ));
                             }
                         }

@@ -5,8 +5,8 @@ members = [
     "lyrics-generators",
     "lyrics-crypto",
     "lyrics-search",
+    "lyrics-helper",
 ]
-exclude = ["lyrics-helper"]
 resolver = "2"
 
 [workspace.package]
