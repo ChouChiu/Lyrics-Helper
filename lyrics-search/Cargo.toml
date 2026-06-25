@@ -14,11 +14,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
 once_cell = { workspace = true }
-reqwest = { workspace = true }
-tokio = { workspace = true }
-async-trait = { workspace = true }
-urlencoding = { workspace = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+urlencoding = { workspace = true, optional = true }
 
 [features]
 default = ["search"]
-search = []
+search = ["reqwest", "tokio", "async-trait", "urlencoding"]
