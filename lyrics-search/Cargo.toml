@@ -1,0 +1,24 @@
+[package]
+name = "lyrics-search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Lyrics search functionality for various platforms"
+
+[dependencies]
+lyrics-core = { path = "../lyrics-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+once_cell = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+urlencoding = { workspace = true }
+
+[features]
+default = ["search"]
+search = []

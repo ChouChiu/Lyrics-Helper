@@ -1,0 +1,16 @@
+[package]
+name = "lyrics-parsers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Lyrics parser implementations for various formats"
+
+[dependencies]
+lyrics-core = { path = "../lyrics-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+quick-xml = { workspace = true }
