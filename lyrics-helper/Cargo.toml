@@ -15,6 +15,17 @@ lyrics-generators = { path = "../lyrics-generators" }
 lyrics-crypto = { path = "../lyrics-crypto" }
 lyrics-search = { path = "../lyrics-search", optional = true }
 
+[dev-dependencies]
+tokio = { workspace = true }
+
 [features]
 default = ["search"]
 search = ["lyrics-search"]
+
+[[example]]
+name = "demo"
+path = "../examples/demo.rs"
+
+[[example]]
+name = "search_test"
+path = "../examples/search_test.rs"
