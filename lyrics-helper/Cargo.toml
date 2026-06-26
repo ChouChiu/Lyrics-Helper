@@ -1,0 +1,35 @@
+[package]
+name = "lyrics-helper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Lyrics toolset - facade crate re-exporting all lyrics crates"
+
+[dependencies]
+lyrics-core = { path = "../lyrics-core" }
+lyrics-parsers = { path = "../lyrics-parsers" }
+lyrics-generators = { path = "../lyrics-generators" }
+lyrics-crypto = { path = "../lyrics-crypto" }
+lyrics-search = { path = "../lyrics-search", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[features]
+default = ["search"]
+search = ["lyrics-search"]
+
+[[example]]
+name = "demo"
+path = "../examples/demo.rs"
+
+[[example]]
+name = "search_test"
+path = "../examples/search_test.rs"
+
+[[example]]
+name = "search_lyrics_test"
+path = "../examples/search_lyrics_test.rs"

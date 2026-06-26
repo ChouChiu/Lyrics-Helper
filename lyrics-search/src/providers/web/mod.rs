@@ -1,0 +1,11 @@
+//! 各平台 Web API 客户端实现。
+
+pub mod apple_music;
+pub mod base_api;
+pub mod kugou;
+pub mod lrclib;
+pub mod musixmatch;
+pub mod netease;
+pub mod qq_music;
+pub mod soda_music;
+pub mod spotify;
