@@ -1,32 +1,32 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SearchResponse {
-    pub tracks: Option<SearchTracks>,
+pub(crate) struct SearchResponse {
+    pub(crate) tracks: Option<SearchTracks>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SearchTracks {
-    pub items: Option<Vec<SearchTrackItem>>,
+pub(crate) struct SearchTracks {
+    pub(crate) items: Option<Vec<SearchTrackItem>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SearchTrackItem {
-    pub id: String,
-    pub name: String,
+pub(crate) struct SearchTrackItem {
+    pub(crate) id: String,
+    pub(crate) name: String,
     #[serde(rename = "duration_ms")]
-    pub duration_ms: i32,
-    pub artists: Option<Vec<SearchArtistItem>>,
-    pub album: Option<SearchAlbumItem>,
+    pub(crate) duration_ms: i32,
+    pub(crate) artists: Option<Vec<SearchArtistItem>>,
+    pub(crate) album: Option<SearchAlbumItem>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SearchArtistItem {
-    pub name: String,
+pub(crate) struct SearchArtistItem {
+    pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SearchAlbumItem {
-    pub name: String,
-    pub artists: Option<Vec<SearchArtistItem>>,
+pub(crate) struct SearchAlbumItem {
+    pub(crate) name: String,
+    pub(crate) artists: Option<Vec<SearchArtistItem>>,
 }

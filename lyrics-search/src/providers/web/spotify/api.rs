@@ -1,7 +1,7 @@
 use super::response::SearchResponse;
 use crate::providers::web::base_api;
 
-pub async fn search(keyword: &str, access_token: &str) -> Option<SearchResponse> {
+pub(crate) async fn search(keyword: &str, access_token: &str) -> Option<SearchResponse> {
     let url = format!(
         "https://api.spotify.com/v1/search?q={}&type=track&limit=10&market=from_token",
         urlencoding::encode(keyword),

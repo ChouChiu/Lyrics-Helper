@@ -1,10 +1,5 @@
 use lyrics_core::models::*;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SubLinesOutputType {
-    InMainLine,
-    InDiffLine,
-}
+use crate::SubLinesOutputType;
 
 pub fn generate(lyrics_data: &LyricsData) -> String {
     generate_with_options(lyrics_data, SubLinesOutputType::InMainLine)

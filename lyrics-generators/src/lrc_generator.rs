@@ -1,16 +1,11 @@
 use lyrics_core::models::*;
+use crate::SubLinesOutputType;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EndTimeOutputType {
     None,
     Huge,
     All,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SubLinesOutputType {
-    InMainLine,
-    InDiffLine,
 }
 
 pub fn generate(lyrics_data: &LyricsData) -> String {

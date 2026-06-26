@@ -1,7 +1,7 @@
 use super::response::SearchResponse;
 use crate::providers::web::base_api;
 
-pub async fn search(
+pub(crate) async fn search(
     keyword: &str,
     access_token: &str,
     storefront: &str,

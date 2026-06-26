@@ -7,6 +7,12 @@ pub mod lyricify_lines_generator;
 
 use lyrics_core::models::*;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SubLinesOutputType {
+    InMainLine,
+    InDiffLine,
+}
+
 pub fn generate_string(lyrics_data: &LyricsData, lyrics_type: LyricsTypes) -> Option<String> {
     let result = match lyrics_type {
         LyricsTypes::LyricifySyllable => lyricify_syllable_generator::generate(lyrics_data),

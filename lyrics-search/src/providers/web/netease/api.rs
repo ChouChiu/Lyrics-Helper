@@ -13,7 +13,7 @@ fn standard_headers() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-pub async fn search(keyword: &str) -> Option<SearchResponse> {
+pub(crate) async fn search(keyword: &str) -> Option<SearchResponse> {
     let url = format!(
         "https://music.163.com/api/search/get?s={}&type=1&limit=10&offset=0",
         urlencoding::encode(keyword)

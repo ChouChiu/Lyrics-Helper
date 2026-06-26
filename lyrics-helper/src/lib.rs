@@ -13,3 +13,6 @@ pub use lyrics_search::providers;
 pub use lyrics_parsers::parsers::parse_lyrics as parse;
 pub use lyrics_parsers::parsers::parse_lyrics_auto as parse_auto;
 pub use lyrics_generators::generate_string;
+
+pub use lyrics_crypto::decrypter::qrc::decrypter::decrypt_lyrics as decrypt_qrc;
+pub use lyrics_crypto::decrypter::krc::decrypter::decrypt_lyrics as decrypt_krc;

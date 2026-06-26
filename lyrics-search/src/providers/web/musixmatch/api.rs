@@ -10,13 +10,13 @@ fn headers() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-pub async fn get_token() -> Option<String> {
+pub(crate) async fn get_token() -> Option<String> {
     let url = format!("{}/token.get?app_id=web-desktop-app-v1.0", BASE_URL);
     let resp: TokenResponse = base_api::get_json_with_headers(&url, &headers()).await?;
     resp.message?.body?.user_token
 }
 
-pub async fn search_track(
+pub(crate) async fn search_track(
     q_track: &str,
     q_artist: &str,
     user_token: &str,
