@@ -47,6 +47,7 @@ impl Searcher for KugouSearcher {
                     duration_ms: song.duration.map(|d| d * 1000),
                     match_type: None,
                     id: song.hash,
+                    numeric_id: None,
                 }
             })
             .collect();

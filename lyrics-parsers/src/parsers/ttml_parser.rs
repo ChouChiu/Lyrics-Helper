@@ -3,6 +3,12 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+static SPACES_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+static OPEN_BRACKET_SPACE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+(\(|（)").unwrap());
+static CLOSE_BRACKET_SPACE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\)|）)\s+").unwrap());
+static BRACKET_CONTENT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\(([^)]*)\)|（([^）]*)）").unwrap());
 
 struct Agent {
     id: String,
@@ -514,8 +520,7 @@ fn normalize_text(text: &str) -> String {
 }
 
 fn normalize_spaces(s: &str) -> String {
-    let re = Regex::new(r"\s+").unwrap();
-    re.replace_all(s.trim(), " ").to_string()
+    SPACES_RE.replace_all(s.trim(), " ").to_string()
 }
 
 fn normalize_lang_key(lang: &str) -> String {
@@ -533,13 +538,11 @@ fn normalize_bracket_inner_spacing_for_bg(syllables: &mut [SyllableInfo]) {
     if syllables.is_empty() {
         return;
     }
-    let re_open = Regex::new(r"\s+(\(|（)").unwrap();
     let first = &mut syllables[0].text;
-    *first = re_open.replace_all(first, "$1").to_string();
+    *first = OPEN_BRACKET_SPACE_RE.replace_all(first, "$1").to_string();
 
-    let re_close = Regex::new(r"(\)|）)\s+").unwrap();
     let last = syllables.last_mut().unwrap();
-    last.text = re_close.replace_all(&last.text, "$1").to_string();
+    last.text = CLOSE_BRACKET_SPACE_RE.replace_all(&last.text, "$1").to_string();
 }
 
 fn apply_replacement(mut line: LineInfo, replacement: &str) -> LineInfo {
@@ -737,8 +740,7 @@ fn apply_bg_translations_to_subline(sub: &mut LineInfo, bg_dict: &HashMap<String
 
 fn split_first_bracket_segment(text: &str) -> (String, Option<String>) {
     let text = normalize_text(text);
-    let re = Regex::new(r"\(([^)]*)\)|（([^）]*)）").unwrap();
-    match re.find(&text) {
+    match BRACKET_CONTENT_RE.find(&text) {
         Some(m) => {
             let bracket_seg = m.as_str().to_string();
             let mut main = text.clone();
@@ -751,10 +753,8 @@ fn split_first_bracket_segment(text: &str) -> (String, Option<String>) {
 
 fn normalize_bracket_outer_spaces(s: &str) -> String {
     let s = normalize_text(s);
-    let re_open = Regex::new(r"\s+(\(|（)").unwrap();
-    let s = re_open.replace_all(&s, "$1").to_string();
-    let re_close = Regex::new(r"(\)|）)\s+").unwrap();
-    re_close.replace_all(&s, "$1").to_string()
+    let s = OPEN_BRACKET_SPACE_RE.replace_all(&s, "$1").to_string();
+    CLOSE_BRACKET_SPACE_RE.replace_all(&s, "$1").to_string()
 }
 
 fn replace_syllable_line_text(syllables: &mut Vec<SyllableInfo>, new_text: &str) {
@@ -779,8 +779,7 @@ fn replace_syllable_line_text(syllables: &mut Vec<SyllableInfo>, new_text: &str)
 
 fn split_subtitle_by_parentheses(value: &str) -> (String, Option<String>) {
     let value = normalize_text(value);
-    let re = Regex::new(r"\(([^)]*)\)|（([^）]*)）").unwrap();
-    match re.captures(&value) {
+    match BRACKET_CONTENT_RE.captures(&value) {
         Some(caps) => {
             let inner = if let Some(m) = caps.get(1) {
                 m.as_str()

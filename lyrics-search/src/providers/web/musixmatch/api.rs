@@ -1,4 +1,4 @@
-use super::response::{TokenResponse, TrackResponse};
+use super::response::{LyricsResponse, SubtitleResponse, TokenResponse, TrackResponse};
 use crate::providers::web::base_api;
 
 const BASE_URL: &str = "https://apic-desktop.musixmatch.com/ws/1.1";
@@ -10,7 +10,7 @@ fn headers() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-pub(crate) async fn get_token() -> Option<String> {
+pub async fn get_token() -> Option<String> {
     let url = format!("{}/token.get?app_id=web-desktop-app-v1.0", BASE_URL);
     let resp: TokenResponse = base_api::get_json_with_headers(&url, &headers()).await?;
     resp.message?.body?.user_token
@@ -29,4 +29,22 @@ pub(crate) async fn search_track(
         urlencoding::encode(q_artist),
     );
     base_api::get_json_with_headers(&url, &headers()).await
+}
+
+pub async fn get_lyrics(track_id: i64, user_token: &str) -> Option<String> {
+    let url = format!(
+        "{}/track.lyrics.get?app_id=web-desktop-app-v1.0&usertoken={}&track_id={}",
+        BASE_URL, user_token, track_id
+    );
+    let resp: LyricsResponse = base_api::get_json_with_headers(&url, &headers()).await?;
+    resp.message?.body?.lyrics?.lyrics_body
+}
+
+pub async fn get_synced_lyrics(track_id: i64, user_token: &str) -> Option<String> {
+    let url = format!(
+        "{}/track.subtitle.get?app_id=web-desktop-app-v1.0&usertoken={}&track_id={}&subtitle_format=lrc",
+        BASE_URL, user_token, track_id
+    );
+    let resp: SubtitleResponse = base_api::get_json_with_headers(&url, &headers()).await?;
+    resp.message?.body?.subtitle?.subtitle_body
 }

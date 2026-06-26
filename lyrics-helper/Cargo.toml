@@ -29,3 +29,7 @@ path = "../examples/demo.rs"
 [[example]]
 name = "search_test"
 path = "../examples/search_test.rs"
+
+[[example]]
+name = "search_lyrics_test"
+path = "../examples/search_lyrics_test.rs"

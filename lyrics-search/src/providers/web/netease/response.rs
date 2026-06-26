@@ -34,3 +34,15 @@ pub(crate) struct Album {
     pub(crate) _id: i64,
     pub(crate) name: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LyricsResponse {
+    pub code: Option<i32>,
+    pub lrc: Option<LyricContent>,
+    pub tlyric: Option<LyricContent>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LyricContent {
+    pub lyric: Option<String>,
+}

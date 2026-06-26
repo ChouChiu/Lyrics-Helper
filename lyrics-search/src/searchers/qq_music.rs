@@ -60,6 +60,7 @@ impl Searcher for QQMusicSearcher {
                     duration_ms: song.interval.map(|i| i * 1000),
                     match_type: None,
                     id: song.mid,
+                    numeric_id: song._id,
                 }
             })
             .collect();

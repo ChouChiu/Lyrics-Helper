@@ -1,7 +1,9 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 
-use super::response::MusicuResponse;
+use super::response::{LyricsResponse, MusicuResponse};
 use crate::providers::web::base_api;
 
 const QQ_HEADERS: &[(&str, &str)] = &[
@@ -226,4 +228,112 @@ pub(crate) async fn search(keyword: &str) -> Option<MusicuResponse> {
             None
         }
     }
+}
+
+#[derive(Serialize)]
+struct LyricsParam {
+    #[serde(rename = "songMID")]
+    song_mid: String,
+    #[serde(rename = "songID")]
+    song_id: i64,
+    #[serde(rename = "songName")]
+    song_name: String,
+    #[serde(rename = "singerName")]
+    singer_name: String,
+    #[serde(rename = "albumName")]
+    album_name: String,
+    interval: i32,
+    #[serde(rename = "lrc_t")]
+    lrc_t: i32,
+    #[serde(rename = "qrc_t")]
+    qrc_t: i32,
+    #[serde(rename = "trans_t")]
+    trans_t: i32,
+    #[serde(rename = "roma_t")]
+    roma_t: i32,
+    crypt: i32,
+    ct: i32,
+    cv: i32,
+    qrc: i32,
+    roma: i32,
+    trans: i32,
+    #[serde(rename = "type")]
+    lyric_type: i32,
+}
+
+#[derive(Serialize)]
+struct LyricsRequestBody {
+    method: String,
+    module: String,
+    param: LyricsParam,
+}
+
+#[derive(Serialize)]
+struct LyricsBody {
+    comm: Comm,
+    request: LyricsRequestBody,
+}
+
+pub async fn get_lyrics(
+    song_mid: &str,
+    song_id: Option<i64>,
+    title: &str,
+    artist: &str,
+    album: &str,
+    duration_ms: Option<i32>,
+) -> Option<(Option<String>, Option<String>)> {
+    let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
+    let interval = duration_ms.unwrap_or(0) / 1000;
+
+    let body = LyricsBody {
+        comm: get_comm().await,
+        request: LyricsRequestBody {
+            method: "GetPlayLyricInfo".to_string(),
+            module: "music.musichallSong.PlayLyricInfo".to_string(),
+            param: LyricsParam {
+                song_mid: song_mid.to_string(),
+                song_id: song_id.unwrap_or(0),
+                song_name: BASE64.encode(title.as_bytes()),
+                singer_name: BASE64.encode(artist.as_bytes()),
+                album_name: BASE64.encode(album.as_bytes()),
+                interval,
+                lrc_t: 0,
+                qrc_t: 0,
+                trans_t: 0,
+                roma_t: 0,
+                crypt: 1,
+                ct: 19,
+                cv: 2111,
+                qrc: 1,
+                roma: 1,
+                trans: 1,
+                lyric_type: 0,
+            },
+        },
+    };
+
+    let resp = base_api::post_json_raw_with_headers(url, &body, QQ_HEADERS).await?;
+    let result: Option<LyricsResponse> = serde_json::from_str(&resp).ok();
+    if result.is_none() {
+        eprintln!("  [QQMusic] Failed to parse lyrics response: {}", &resp[..resp.len().min(500)]);
+    }
+
+    let data = result?.request?.data?;
+
+    let lyric = decrypt_qrc_lyric(&data.lyric, data.qrc_t.unwrap_or(0), data.lrc_t.unwrap_or(0));
+    let trans = decrypt_qrc_lyric(&data.trans, data.trans_t.unwrap_or(0), 0);
+
+    Some((lyric, trans))
+}
+
+fn decrypt_qrc_lyric(encrypted: &Option<String>, qrc_t: i32, lrc_t: i32) -> Option<String> {
+    let text = encrypted.as_ref()?;
+    if text.is_empty() {
+        return None;
+    }
+    let t = if qrc_t != 0 { qrc_t } else { lrc_t };
+    if t == 0 {
+        return None;
+    }
+    lyrics_crypto::decrypter::qrc::decrypter::decrypt_lyrics(text)
 }

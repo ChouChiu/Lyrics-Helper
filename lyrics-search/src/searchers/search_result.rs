@@ -11,6 +11,7 @@ pub struct SearchResult {
     pub duration_ms: Option<i32>,
     pub match_type: Option<MatchType>,
     pub id: String,
+    pub numeric_id: Option<i64>,
 }
 
 impl SearchResult {

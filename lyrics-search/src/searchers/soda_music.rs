@@ -46,6 +46,7 @@ impl Searcher for SodaMusicSearcher {
                     duration_ms: track.duration.map(|d| d as i32),
                     match_type: None,
                     id: track.id.clone(),
+                    numeric_id: None,
                 })
             })
             .collect();

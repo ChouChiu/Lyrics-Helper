@@ -1,6 +1,9 @@
 use regex::Regex;
+use std::sync::LazyLock;
 use lyrics_core::models::*;
 use crate::parsers::attributes_helper;
+
+static QRC_SYLLABLE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(.*?)\((\d+),(\d+)\)").unwrap());
 
 pub fn parse(input: &str) -> LyricsData {
     let mut lyrics_lines: Vec<String> = input.trim().lines().map(|s| s.to_string()).collect();
@@ -46,10 +49,9 @@ pub fn parse_lyrics_line(line: &str) -> Option<LineInfo> {
         line
     };
 
-    let re = Regex::new(r"(.*?)\((\d+),(\d+)\)").ok()?;
     let mut syllables: Vec<SyllableInfo> = Vec::new();
 
-    for cap in re.captures_iter(line) {
+    for cap in QRC_SYLLABLE_RE.captures_iter(line) {
         if cap.len() == 4 {
             let text = cap[1].to_string();
             let start_time: i32 = cap[2].parse().ok()?;

@@ -60,6 +60,7 @@ impl Searcher for MusixmatchSearcher {
             duration_ms: Some(track.track_length * 1000),
             match_type: Some(match_type),
             id: track.track_id.to_string(),
+            numeric_id: None,
         };
 
         Some(vec![result])

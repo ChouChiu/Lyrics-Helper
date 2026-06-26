@@ -48,3 +48,44 @@ pub(crate) struct TokenMessage {
 pub(crate) struct TokenBody {
     pub(crate) user_token: Option<String>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct LyricsResponse {
+    pub(crate) message: Option<LyricsMessage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct LyricsMessage {
+    pub(crate) body: Option<LyricsBody>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct LyricsBody {
+    pub(crate) lyrics: Option<LyricsContent>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct LyricsContent {
+    pub(crate) lyrics_body: Option<String>,
+    pub(crate) script_tracking_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SubtitleResponse {
+    pub(crate) message: Option<SubtitleMessage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SubtitleMessage {
+    pub(crate) body: Option<SubtitleBody>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SubtitleBody {
+    pub(crate) subtitle: Option<SubtitleContent>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SubtitleContent {
+    pub(crate) subtitle_body: Option<String>,
+}

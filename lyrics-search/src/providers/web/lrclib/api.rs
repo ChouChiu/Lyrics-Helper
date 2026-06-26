@@ -4,7 +4,7 @@ use crate::providers::web::base_api;
 const BASE_URL: &str = "https://lrclib.net/api";
 const USER_AGENT: &str = "Lyrics-Helper (https://github.com/WXRIW/Lyricify-Lyrics-Helper)";
 
-pub(crate) async fn search(
+pub async fn search(
     track_name: &str,
     artist_name: Option<&str>,
     album_name: Option<&str>,
@@ -31,7 +31,7 @@ pub(crate) async fn search(
     base_api::get_json_with_headers(&url, &[("User-Agent", USER_AGENT)]).await
 }
 
-pub(crate) async fn get(
+pub async fn get(
     track_name: &str,
     artist_name: &str,
     album_name: Option<&str>,
@@ -55,7 +55,7 @@ pub(crate) async fn get(
     base_api::get_json_with_headers(&url, &[("User-Agent", USER_AGENT)]).await
 }
 
-pub(crate) async fn _get_by_id(id: i32) -> Option<GetLyricResult> {
+pub async fn get_by_id(id: i32) -> Option<GetLyricResult> {
     let url = format!("{}/get/{}", BASE_URL, id);
     base_api::get_json_with_headers(&url, &[("User-Agent", USER_AGENT)]).await
 }

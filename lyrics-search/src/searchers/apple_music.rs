@@ -59,6 +59,7 @@ impl Searcher for AppleMusicSearcher {
                     duration_ms: attrs.duration_in_millis,
                     match_type: None,
                     id: song.id,
+                    numeric_id: None,
                 })
             })
             .collect();

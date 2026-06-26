@@ -59,6 +59,7 @@ impl Searcher for SpotifySearcher {
                     duration_ms: Some(track.duration_ms),
                     match_type: None,
                     id: track.id,
+                    numeric_id: None,
                 })
             })
             .collect();

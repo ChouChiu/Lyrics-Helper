@@ -652,7 +652,9 @@ name = "lyrics-search"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64",
  "lyrics-core",
+ "lyrics-crypto",
  "once_cell",
  "rand",
  "regex",

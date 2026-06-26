@@ -43,3 +43,37 @@ pub(crate) struct Singer {
 pub(crate) struct Album {
     pub(crate) name: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LyricsResponse {
+    pub code: Option<i32>,
+    pub request: Option<LyricsReqData>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LyricsReqData {
+    #[serde(rename = "code")]
+    pub _code: Option<i32>,
+    pub data: Option<LyricsReqInner>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LyricsReqInner {
+    pub lyric: Option<String>,
+    pub trans: Option<String>,
+    pub roma: Option<String>,
+    #[serde(rename = "lyric_url")]
+    pub _lyric_url: Option<String>,
+    #[serde(rename = "trans_url")]
+    pub _trans_url: Option<String>,
+    #[serde(rename = "roma_url")]
+    pub _roma_url: Option<String>,
+    #[serde(rename = "lrc_t")]
+    pub lrc_t: Option<i32>,
+    #[serde(rename = "qrc_t")]
+    pub qrc_t: Option<i32>,
+    #[serde(rename = "trans_t")]
+    pub trans_t: Option<i32>,
+    #[serde(rename = "roma_t")]
+    pub roma_t: Option<i32>,
+}

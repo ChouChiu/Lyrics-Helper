@@ -39,6 +39,7 @@ impl Searcher for NeteaseSearcher {
                     duration_ms: Some(song.duration as i32),
                     match_type: None,
                     id: song.id.to_string(),
+                    numeric_id: None,
                 }
             })
             .collect();

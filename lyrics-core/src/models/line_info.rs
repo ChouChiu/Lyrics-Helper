@@ -212,10 +212,13 @@ impl LineInfo {
             Self::Line { text, sub_line, .. } | Self::FullLine { text, sub_line, .. } => {
                 if let Some(sub) = sub_line {
                     let sub_text = crate::helpers::string_helper::remove_front_back_brackets(&sub.text_from_any());
-                    if sub.start_time() < self.start_time() {
-                        format!("({}) {}", sub_text, text.trim())
-                    } else {
-                        format!("{} ({})", text.trim(), sub_text)
+                    match (sub.start_time(), self.start_time()) {
+                        (Some(sub_t), Some(main_t)) if sub_t < main_t => {
+                            format!("({}) {}", sub_text, text.trim())
+                        }
+                        _ => {
+                            format!("{} ({})", text.trim(), sub_text)
+                        }
                     }
                 } else {
                     text.clone()
@@ -226,10 +229,13 @@ impl LineInfo {
                 let text = Self::text_from_syllables(syllables);
                 if let Some(sub) = sub_line {
                     let sub_text = crate::helpers::string_helper::remove_front_back_brackets(&sub.text_from_any());
-                    if sub.start_time() < self.start_time() {
-                        format!("({}) {}", sub_text, text.trim())
-                    } else {
-                        format!("{} ({})", text.trim(), sub_text)
+                    match (sub.start_time(), self.start_time()) {
+                        (Some(sub_t), Some(main_t)) if sub_t < main_t => {
+                            format!("({}) {}", sub_text, text.trim())
+                        }
+                        _ => {
+                            format!("{} ({})", text.trim(), sub_text)
+                        }
                     }
                 } else {
                     text

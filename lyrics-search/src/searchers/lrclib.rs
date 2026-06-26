@@ -46,6 +46,7 @@ impl Searcher for LRCLIBSearcher {
                 duration_ms: Some((result.duration * 1000.0) as i32),
                 match_type: None,
                 id: result.id.to_string(),
+                numeric_id: None,
             };
             return Some(vec![item]);
         }
@@ -87,6 +88,7 @@ fn map_results(results: Vec<super::super::providers::web::lrclib::response::Sear
             duration_ms: Some((item.duration * 1000.0) as i32),
             match_type: None,
             id: item.id.to_string(),
+            numeric_id: None,
         })
         .collect()
 }
