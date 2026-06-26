@@ -221,14 +221,57 @@ fn test_math_helper_min_max() {
 }
 
 #[test]
-fn test_chinese_helper() {
-    let simplified = "简体中文";
-    let traditional = helpers::chinese_helper::to_traditional(simplified);
-    let back = helpers::chinese_helper::to_simplified(&traditional);
+fn test_chinese_helper_to_traditional() {
+    assert_eq!(
+        helpers::chinese_helper::to_traditional("简体中文"),
+        "簡體中文"
+    );
+    assert_eq!(
+        helpers::chinese_helper::to_traditional("开放中文转换"),
+        "開放中文轉換"
+    );
+    assert_eq!(
+        helpers::chinese_helper::to_traditional("了"),
+        "了" // 了 is identical in both scripts
+    );
+    assert_eq!(
+        helpers::chinese_helper::to_traditional("学习"),
+        "學習"
+    );
+    assert_eq!(helpers::chinese_helper::to_traditional(""), "");
+    assert_eq!(helpers::chinese_helper::to_traditional("abc123"), "abc123");
+}
 
-    // Should round-trip (at least for characters in our mapping)
+#[test]
+fn test_chinese_helper_to_simplified() {
+    assert_eq!(
+        helpers::chinese_helper::to_simplified("繁體中文"),
+        "繁体中文"
+    );
+    assert_eq!(
+        helpers::chinese_helper::to_simplified("開放中文轉換"),
+        "开放中文转换"
+    );
+    assert_eq!(
+        helpers::chinese_helper::to_simplified("了"),
+        "了"
+    );
+    assert_eq!(
+        helpers::chinese_helper::to_simplified("學習"),
+        "学习"
+    );
+    assert_eq!(helpers::chinese_helper::to_simplified(""), "");
+    assert_eq!(helpers::chinese_helper::to_simplified("abc123"), "abc123");
+}
+
+#[test]
+fn test_chinese_helper_roundtrip() {
+    let original = "简体中文转换";
+    let traditional = helpers::chinese_helper::to_traditional(original);
+    let back = helpers::chinese_helper::to_simplified(&traditional);
+    // s2t → t2s roundtrip should be largely idempotent
     assert!(!traditional.is_empty());
-    assert!(!back.is_empty());
+    assert_eq!(back, original);
 }
 
 #[test]

@@ -82,7 +82,7 @@ pub fn is_lyricify_lines_pattern(input: &str) -> bool {
         return false;
     }
     let syllable_matches = SYLLABLE_RE.find_iter(input).count();
-    syllable_matches <= line_matches
+    syllable_matches > 0
 }
 
 /// 判断文本是否为 LRC 格式歌词。

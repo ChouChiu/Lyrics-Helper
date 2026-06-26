@@ -331,7 +331,7 @@ pub fn compare_name(name1: Option<&str>, name2: Option<&str>) -> Option<NameMatc
                 return true;
             }
         }
-        if str2.contains('(') && !str2.contains('(') {
+        if str2.contains('(') && !str1.contains('(') {
             let idx = str2.find('(').unwrap();
             if str2[..idx].trim() == str1 {
                 return true;
