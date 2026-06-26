@@ -20,10 +20,10 @@ lyrics-helper/          # facade crate — re-exports all above; holds tests and
   tests/
     parser_tests.rs     # integration tests for all parsers + generators + decrypters
     test_data/          # 12 fixture files (LRC, QRC, KRC, YRC, TTML, Spotify, Musixmatch, Lyricify, Apple)
-examples/
-  demo.rs               # CLI demo: parse, generate, detect, decrypt, parsers-demo, generators-demo
-  search_test.rs        # search API demo (requires network)
-  search_lyrics_test.rs # search+fetch lyrics demo (requires network)
+  examples/
+    demo.rs               # CLI demo: parse, generate, detect, decrypt, parsers-demo, generators-demo
+    search_test.rs        # search API demo (requires network)
+    search_lyrics_test.rs # search+fetch lyrics demo (requires network)
 ```
 
 ## Key commands
@@ -65,6 +65,6 @@ cargo run --example demo -- generate lyrics-helper/tests/test_data/LrcDemo.txt l
 - **Dev dependency**: `pretty_assertions` for readable test diffs.
 - **Crate names**: package names use hyphens (`lyrics-helper`), Rust crate names use underscores (`lyrics_helper`).
 - **Doc alias**: `cargo doc-local` = `cargo doc --no-deps --open` (defined in `.cargo/config.toml`).
-- **Examples path**: examples live at workspace root `examples/`, declared in `lyrics-helper/Cargo.toml` with `path = "../examples/..."`.
+- **Examples path**: examples live at `lyrics-helper/examples/`, declared in `lyrics-helper/Cargo.toml` with `path = "examples/..."`.
 - **Docs directory**: `docs/compose/` is gitignored — contains planning/design docs, not source of truth.
 - **Key entrypoints**: `lyrics-helper/src/lib.rs` is the facade; `lyrics-parsers/src/parsers/mod.rs` has `parse_lyrics`/`parse_lyrics_auto`; `lyrics-generators/src/lib.rs` has `generate_string`.
