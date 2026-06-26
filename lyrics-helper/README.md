@@ -8,7 +8,7 @@ Rust 歌词工具库，支持解析、生成、解密、搜索多种歌词格式
 
 ```toml
 [dependencies]
-lyrics-helper = "0.1.1"
+lyrics-helper = "0.1"
 ```
 
 自动检测格式并解析歌词：
@@ -64,7 +64,7 @@ cargo run --example demo -- generate lyrics-helper/tests/test_data/LrcDemo.txt l
 搜索功能需要启用 `search` feature（默认启用），依赖 `reqwest` 和 `tokio`。如需纯离线解析库，禁用默认 features：
 
 ```toml
-lyrics-helper = { version = "0.1.1", default-features = false }
+lyrics-helper = { version = "0.1", default-features = false }
 ```
 
 ## 项目架构

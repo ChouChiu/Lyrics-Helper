@@ -7,8 +7,9 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Lyrics decryption implementations"
+readme = "README.md"
 
 [dependencies]
-lyrics-core = { path = "../lyrics-core", version = "0.1.0" }
+lyrics-core = { path = "../lyrics-core", version = "0.1.1" }
 flate2 = { workspace = true }
 base64 = { workspace = true }

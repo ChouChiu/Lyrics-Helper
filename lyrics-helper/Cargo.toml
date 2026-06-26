@@ -7,13 +7,14 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Lyrics toolset - facade crate re-exporting all lyrics crates"
+readme = "README.md"
 
 [dependencies]
-lyrics-core = { path = "../lyrics-core", version = "0.1.0" }
-lyrics-parsers = { path = "../lyrics-parsers", version = "0.1.0" }
-lyrics-generators = { path = "../lyrics-generators", version = "0.1.0" }
-lyrics-crypto = { path = "../lyrics-crypto", version = "0.1.0" }
-lyrics-search = { path = "../lyrics-search", version = "0.1.0", optional = true }
+lyrics-core = { path = "../lyrics-core", version = "0.1.1" }
+lyrics-parsers = { path = "../lyrics-parsers", version = "0.1.1" }
+lyrics-generators = { path = "../lyrics-generators", version = "0.1.1" }
+lyrics-crypto = { path = "../lyrics-crypto", version = "0.1.1" }
+lyrics-search = { path = "../lyrics-search", version = "0.1.1", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
