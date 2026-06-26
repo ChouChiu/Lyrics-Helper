@@ -340,8 +340,8 @@ fn key_schedule(key: &[u8], schedule: &mut [[u8; 6]], mode: u32) {
     }
 
     for (i, &shift) in KEY_RND_SHIFT.iter().enumerate() {
-        c = ((c << shift) | (c >> (28 - shift))) & 0x0fffffff;
-        d = ((d << shift) | (d >> (28 - shift))) & 0x0fffffff;
+        c = ((c << shift) | (c >> (28 - shift))) & 0xfffffff0;
+        d = ((d << shift) | (d >> (28 - shift))) & 0xfffffff0;
 
         let togen = if mode == DECRYPT { 15 - i } else { i };
         schedule[togen] = [0u8; 6];
