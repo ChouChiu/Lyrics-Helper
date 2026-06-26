@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Lyrics parser implementations for various formats"
 
 [dependencies]
-lyrics-core = { path = "../lyrics-core" }
+lyrics-core = { path = "../lyrics-core", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }

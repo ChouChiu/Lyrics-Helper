@@ -9,11 +9,11 @@ repository.workspace = true
 description = "Lyrics toolset - facade crate re-exporting all lyrics crates"
 
 [dependencies]
-lyrics-core = { path = "../lyrics-core" }
-lyrics-parsers = { path = "../lyrics-parsers" }
-lyrics-generators = { path = "../lyrics-generators" }
-lyrics-crypto = { path = "../lyrics-crypto" }
-lyrics-search = { path = "../lyrics-search", optional = true }
+lyrics-core = { path = "../lyrics-core", version = "0.1.0" }
+lyrics-parsers = { path = "../lyrics-parsers", version = "0.1.0" }
+lyrics-generators = { path = "../lyrics-generators", version = "0.1.0" }
+lyrics-crypto = { path = "../lyrics-crypto", version = "0.1.0" }
+lyrics-search = { path = "../lyrics-search", version = "0.1.0", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -22,14 +22,4 @@ tokio = { workspace = true }
 default = ["search"]
 search = ["lyrics-search"]
 
-[[example]]
-name = "demo"
-path = "../examples/demo.rs"
 
-[[example]]
-name = "search_test"
-path = "../examples/search_test.rs"
-
-[[example]]
-name = "search_lyrics_test"
-path = "../examples/search_lyrics_test.rs"

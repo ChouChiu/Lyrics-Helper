@@ -9,8 +9,8 @@ repository.workspace = true
 description = "Lyrics search functionality for various platforms"
 
 [dependencies]
-lyrics-core = { path = "../lyrics-core" }
-lyrics-crypto = { path = "../lyrics-crypto" }
+lyrics-core = { path = "../lyrics-core", version = "0.1.0" }
+lyrics-crypto = { path = "../lyrics-crypto", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
