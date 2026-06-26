@@ -9,7 +9,7 @@ pub struct KugouSearcher;
 
 fn split_artists(singername: &str) -> Vec<String> {
     singername
-        .split(|c: char| c == ',' || c == '、' || c == '/')
+        .split([',', '、', '/'])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()

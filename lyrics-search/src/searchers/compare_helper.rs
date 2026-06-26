@@ -341,7 +341,7 @@ pub fn compare_name(name1: Option<&str>, name2: Option<&str>) -> Option<NameMatc
     if n1_len == n2_len && n1_len > 0 {
         let count = chars_eq_at(&n1, &n2);
         if (count as f64 / n1_len as f64 >= 0.8 && n1_len >= 4)
-            || (count as f64 / n1_len as f64 >= 0.5 && n1_len >= 2 && n1_len <= 3)
+            || (count as f64 / n1_len as f64 >= 0.5 && (2..=3).contains(&n1_len))
         {
             return Some(NameMatchType::High);
         }

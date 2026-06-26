@@ -1,7 +1,29 @@
 use flate2::read::ZlibDecoder;
+use lyrics_core::traits::decrypter::{DecryptError, LyricsDecrypter};
 use std::io::Read;
 
 const QRC_KEY: &[u8; 24] = b"!@#)(*$%123ZXC!@!@#)(NHL";
+
+pub struct QrcDecrypter;
+
+impl LyricsDecrypter for QrcDecrypter {
+    fn decrypt(&self, input: &str) -> Result<String, DecryptError> {
+        decrypt_lyrics(input).ok_or(DecryptError::DecryptionFailed)
+    }
+
+    fn decrypt_bytes(&self, input: &[u8]) -> Result<Vec<u8>, DecryptError> {
+        let hex = std::str::from_utf8(input).map_err(|_| DecryptError::InvalidEncoding)?;
+        let encrypted_bytes = hex_to_bytes(hex).ok_or(DecryptError::InvalidInput)?;
+        let decrypted = triple_des_decrypt(&encrypted_bytes).ok_or(DecryptError::DecryptionFailed)?;
+        let mut decoder = ZlibDecoder::new(&decrypted[..]);
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).map_err(|_| DecryptError::DecompressionFailed)?;
+        if decompressed.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            decompressed.drain(..3);
+        }
+        Ok(decompressed)
+    }
+}
 
 pub fn decrypt_lyrics(encrypted_lyrics: &str) -> Option<String> {
     // Remove whitespace and newlines
@@ -44,7 +66,7 @@ fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
 }
 
 fn triple_des_decrypt(data: &[u8]) -> Option<Vec<u8>> {
-    if !data.len().is_multiple_of(8) {
+    if data.len() % 8 != 0 {
         return None;
     }
 

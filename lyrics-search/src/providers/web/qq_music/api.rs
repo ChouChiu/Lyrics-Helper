@@ -152,7 +152,7 @@ async fn init_session() -> Option<(String, String, String)> {
 }
 
 async fn get_session() -> &'static Option<(String, String, String)> {
-    SESSION.get_or_init(|| init_session()).await
+    SESSION.get_or_init(init_session).await
 }
 
 async fn get_comm() -> Comm {
@@ -190,7 +190,7 @@ fn generate_search_id() -> String {
     (part1 + part2 + part3).to_string()
 }
 
-pub async fn search(keyword: &str) -> Option<MusicuResponse> {
+pub(crate) async fn search(keyword: &str) -> Option<MusicuResponse> {
     let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
     let body = MusicuBody {
         comm: get_comm().await,

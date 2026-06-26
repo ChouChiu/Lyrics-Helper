@@ -1,49 +1,50 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TrackResponse {
-    pub message: Option<Message>,
+pub(crate) struct TrackResponse {
+    pub(crate) message: Option<Message>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Message {
-    pub header: Header,
-    pub body: Option<Body>,
+pub(crate) struct Message {
+    pub(crate) header: Header,
+    pub(crate) body: Option<Body>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Header {
-    pub status_code: i32,
+#[allow(dead_code)]
+pub(crate) struct Header {
+    pub(crate) status_code: i32,
     #[serde(default)]
-    pub confidence: f64,
+    pub(crate) confidence: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Body {
-    pub track: Option<Track>,
+pub(crate) struct Body {
+    pub(crate) track: Option<Track>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Track {
-    pub track_id: i64,
-    pub track_name: String,
-    pub artist_name: String,
-    pub album_name: Option<String>,
+pub(crate) struct Track {
+    pub(crate) track_id: i64,
+    pub(crate) track_name: String,
+    pub(crate) artist_name: String,
+    pub(crate) album_name: Option<String>,
     #[serde(default)]
-    pub track_length: i32,
+    pub(crate) track_length: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TokenResponse {
-    pub message: Option<TokenMessage>,
+pub(crate) struct TokenResponse {
+    pub(crate) message: Option<TokenMessage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TokenMessage {
-    pub body: Option<TokenBody>,
+pub(crate) struct TokenMessage {
+    pub(crate) body: Option<TokenBody>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TokenBody {
-    pub user_token: Option<String>,
+pub(crate) struct TokenBody {
+    pub(crate) user_token: Option<String>,
 }

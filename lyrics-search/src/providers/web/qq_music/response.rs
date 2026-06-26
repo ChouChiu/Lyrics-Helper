@@ -1,44 +1,45 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct MusicuResponse {
-    pub code: Option<i32>,
-    pub request: Option<RequestData>,
+pub(crate) struct MusicuResponse {
+    pub(crate) code: Option<i32>,
+    pub(crate) request: Option<RequestData>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RequestData {
-    pub code: Option<i32>,
-    pub data: Option<RequestDataInner>,
+pub(crate) struct RequestData {
+    pub(crate) code: Option<i32>,
+    pub(crate) data: Option<RequestDataInner>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RequestDataInner {
-    pub body: Option<Body>,
+pub(crate) struct RequestDataInner {
+    pub(crate) body: Option<Body>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Body {
+pub(crate) struct Body {
     #[serde(rename = "item_song")]
-    pub item_song: Option<Vec<SongItem>>,
+    pub(crate) item_song: Option<Vec<SongItem>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SongItem {
-    pub id: Option<i64>,
-    pub mid: String,
-    pub title: String,
-    pub singer: Option<Vec<Singer>>,
-    pub album: Option<Album>,
-    pub interval: Option<i32>,
+#[allow(dead_code)]
+pub(crate) struct SongItem {
+    pub(crate) id: Option<i64>,
+    pub(crate) mid: String,
+    pub(crate) title: String,
+    pub(crate) singer: Option<Vec<Singer>>,
+    pub(crate) album: Option<Album>,
+    pub(crate) interval: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Singer {
-    pub name: String,
+pub(crate) struct Singer {
+    pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Album {
-    pub name: String,
+pub(crate) struct Album {
+    pub(crate) name: String,
 }

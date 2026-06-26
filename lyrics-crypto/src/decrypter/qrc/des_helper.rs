@@ -1,6 +1,8 @@
 // Simplified Triple-DES implementation for QRC decryption
 // Note: This is a simplified version for demonstration purposes
 
+#![allow(dead_code)]
+
 const ENCRYPT: i32 = 1;
 const DECRYPT: i32 = 0;
 
@@ -158,7 +160,7 @@ fn inv_ip(state: &mut [u8], input: &[u8]) {
         | bitnum(input, 24, 0);
 }
 
-pub fn des_key_setup(key: &[u8], schedule: &mut [[u8; 8]; 16], mode: i32) {
+pub(crate) fn des_key_setup(key: &[u8], schedule: &mut [[u8; 8]; 16], mode: i32) {
     let mut key_bits = [0u8; 64];
     for i in 0..8 {
         for j in 0..8 {
@@ -221,7 +223,7 @@ pub fn des_key_setup(key: &[u8], schedule: &mut [[u8; 8]; 16], mode: i32) {
     }
 }
 
-pub fn des_crypt(block: &[u8], schedule: &[[u8; 8]; 16]) -> [u8; 8] {
+pub(crate) fn des_crypt(block: &[u8], schedule: &[[u8; 8]; 16]) -> [u8; 8] {
     let mut state = [0u8; 8];
     let mut result = [0u8; 8];
 
@@ -241,7 +243,7 @@ pub fn des_crypt(block: &[u8], schedule: &[[u8; 8]; 16]) -> [u8; 8] {
     result
 }
 
-pub fn triple_des_key_setup(key: &[u8], schedule: &mut [[[u8; 8]; 16]; 3], mode: i32) {
+pub(crate) fn triple_des_key_setup(key: &[u8], schedule: &mut [[[u8; 8]; 16]; 3], mode: i32) {
     let mut key1 = [0u8; 8];
     let mut key2 = [0u8; 8];
     let mut key3 = [0u8; 8];
@@ -261,7 +263,7 @@ pub fn triple_des_key_setup(key: &[u8], schedule: &mut [[[u8; 8]; 16]; 3], mode:
     }
 }
 
-pub fn triple_des_crypt(block: &[u8], schedule: &[[[u8; 8]; 16]; 3]) -> [u8; 8] {
+pub(crate) fn triple_des_crypt(block: &[u8], schedule: &[[[u8; 8]; 16]; 3]) -> [u8; 8] {
     let temp1 = des_crypt(block, &schedule[0]);
     let temp2 = des_crypt(&temp1, &schedule[1]);
     des_crypt(&temp2, &schedule[2])

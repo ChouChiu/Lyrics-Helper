@@ -214,14 +214,14 @@ pub async fn search_for_best_result_with_match(
 ) -> Option<SearchResult> {
     let results = search_with_refinement(searcher, track, false).await;
     if let Some(first) = results.first() {
-        if first.match_type.map_or(false, |m| m >= minimum_match) {
+        if first.match_type.is_some_and(|m| m >= minimum_match) {
             return Some(results.into_iter().next().unwrap());
         }
     }
 
     let results = search_with_refinement(searcher, track, true).await;
     if let Some(first) = results.first() {
-        if first.match_type.map_or(false, |m| m >= minimum_match) {
+        if first.match_type.is_some_and(|m| m >= minimum_match) {
             return Some(results.into_iter().next().unwrap());
         }
     }
