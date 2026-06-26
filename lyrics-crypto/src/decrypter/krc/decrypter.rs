@@ -30,6 +30,7 @@ impl LyricsDecrypter for KrcDecrypter {
         if decompressed.is_empty() {
             return Err(DecryptError::DecompressionFailed);
         }
+        // KRC format has an extra leading byte before the actual UTF-8 content
         Ok(decompressed[1..].to_vec())
     }
 }

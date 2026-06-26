@@ -85,7 +85,7 @@ fn bitnum_intl(a: u32, b: usize, c: usize) -> u32 {
 }
 
 fn sbox_bit(a: u8) -> usize {
-    (((a & 0x20) | ((a & 0x1f) >> 1) | ((a & 0x01) << 4))) as usize
+    ((a & 0x20) | ((a & 0x1f) >> 1) | ((a & 0x01) << 4)) as usize
 }
 
 fn initial_permutation(input: &[u8]) -> (u32, u32) {
@@ -317,12 +317,12 @@ fn des_f(state: u32, key: &[u8]) -> u32 {
 fn des_crypt(input: &[u8], output: &mut [u8], key: &[[u8; 6]]) {
     let (mut s0, mut s1) = initial_permutation(input);
 
-    for idx in 0..15 {
+    for k in key.iter().take(15) {
         let t = s1;
-        s1 = des_f(s1, &key[idx]) ^ s0;
+        s1 = des_f(s1, k) ^ s0;
         s0 = t;
     }
-    s0 = des_f(s1, &key[15]) ^ s0;
+    s0 ^= des_f(s1, &key[15]);
 
     let result = inverse_permutation(s0, s1);
     output.copy_from_slice(&result);
@@ -332,16 +332,16 @@ fn key_schedule(key: &[u8], schedule: &mut [[u8; 6]], mode: u32) {
     let mut c: u32 = 0;
     let mut d: u32 = 0;
 
-    for i in 0..28 {
-        c |= bitnum(key, KEY_PERM_C[i] as usize, 31 - i);
+    for (i, &perm) in KEY_PERM_C.iter().enumerate() {
+        c |= bitnum(key, perm as usize, 31 - i);
     }
-    for i in 0..28 {
-        d |= bitnum(key, KEY_PERM_D[i] as usize, 31 - i);
+    for (i, &perm) in KEY_PERM_D.iter().enumerate() {
+        d |= bitnum(key, perm as usize, 31 - i);
     }
 
-    for i in 0..16 {
-        c = ((c << KEY_RND_SHIFT[i]) | (c >> (28 - KEY_RND_SHIFT[i]))) & 0xfffffff0;
-        d = ((d << KEY_RND_SHIFT[i]) | (d >> (28 - KEY_RND_SHIFT[i]))) & 0xfffffff0;
+    for (i, &shift) in KEY_RND_SHIFT.iter().enumerate() {
+        c = ((c << shift) | (c >> (28 - shift))) & 0xfffffff0;
+        d = ((d << shift) | (d >> (28 - shift))) & 0xfffffff0;
 
         let togen = if mode == DECRYPT { 15 - i } else { i };
         schedule[togen] = [0u8; 6];
@@ -389,10 +389,17 @@ pub fn decrypt_lyrics(encrypted_lyrics: &str) -> Option<String> {
 
     for i in (0..encrypted_bytes.len()).step_by(8) {
         let end = (i + 8).min(encrypted_bytes.len());
-        if end - i < 8 {
-            break;
+        let block_len = end - i;
+        if block_len == 8 {
+            triple_des_crypt(&encrypted_bytes[i..end], &mut data[i..end], &schedule);
+        } else {
+            // Pad incomplete block with zeros to match C# behavior
+            let mut padded_input = [0u8; 8];
+            padded_input[..block_len].copy_from_slice(&encrypted_bytes[i..end]);
+            let mut padded_output = [0u8; 8];
+            triple_des_crypt(&padded_input, &mut padded_output, &schedule);
+            data[i..end].copy_from_slice(&padded_output[..block_len]);
         }
-        triple_des_crypt(&encrypted_bytes[i..end], &mut data[i..end], &schedule);
     }
 
     let mut decoder = ZlibDecoder::new(&data[..]);
@@ -409,13 +416,16 @@ pub fn decrypt_lyrics(encrypted_lyrics: &str) -> Option<String> {
 }
 
 fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        return None;
+    }
     let mut bytes = Vec::with_capacity(hex.len() / 2);
     let chars: Vec<char> = hex.chars().collect();
     let mut i = 0;
 
     while i < chars.len() {
         let high = chars[i].to_digit(16)?;
-        let low = chars.get(i + 1).and_then(|c| c.to_digit(16)).unwrap_or(0);
+        let low = chars[i + 1].to_digit(16)?;
         bytes.push((high * 16 + low) as u8);
         i += 2;
     }

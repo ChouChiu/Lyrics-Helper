@@ -67,6 +67,7 @@ pub(crate) struct LyricsBody {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct LyricsContent {
     pub(crate) lyrics_body: Option<String>,
+    #[allow(dead_code)]
     pub(crate) script_tracking_url: Option<String>,
 }
 
