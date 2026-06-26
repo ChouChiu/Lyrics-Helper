@@ -55,8 +55,7 @@ pub(crate) async fn get(
     base_api::get_json_with_headers(&url, &[("User-Agent", USER_AGENT)]).await
 }
 
-#[allow(dead_code)]
-pub(crate) async fn get_by_id(id: i32) -> Option<GetLyricResult> {
+pub(crate) async fn _get_by_id(id: i32) -> Option<GetLyricResult> {
     let url = format!("{}/get/{}", BASE_URL, id);
     base_api::get_json_with_headers(&url, &[("User-Agent", USER_AGENT)]).await
 }

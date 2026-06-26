@@ -1,10 +1,10 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub(crate) struct SearchResponse {
     pub(crate) result: Option<SearchResultData>,
-    pub(crate) code: Option<i32>,
+    #[serde(rename = "code")]
+    pub(crate) _code: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -22,15 +22,15 @@ pub(crate) struct Song {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub(crate) struct Artist {
-    pub(crate) id: i64,
+    #[serde(rename = "id")]
+    pub(crate) _id: i64,
     pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub(crate) struct Album {
-    pub(crate) id: i64,
+    #[serde(rename = "id")]
+    pub(crate) _id: i64,
     pub(crate) name: String,
 }

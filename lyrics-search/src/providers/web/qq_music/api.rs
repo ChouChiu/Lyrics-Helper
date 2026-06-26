@@ -84,9 +84,9 @@ struct SessionResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 struct SessionReqData {
-    code: Option<i32>,
+    #[serde(rename = "code")]
+    _code: Option<i32>,
     data: Option<SessionData>,
 }
 

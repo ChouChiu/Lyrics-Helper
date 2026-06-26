@@ -24,9 +24,9 @@ pub(crate) struct Body {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub(crate) struct SongItem {
-    pub(crate) id: Option<i64>,
+    #[serde(rename = "id")]
+    pub(crate) _id: Option<i64>,
     pub(crate) mid: String,
     pub(crate) title: String,
     pub(crate) singer: Option<Vec<Singer>>,

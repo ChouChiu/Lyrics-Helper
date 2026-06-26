@@ -12,9 +12,9 @@ pub(crate) struct Message {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub(crate) struct Header {
-    pub(crate) status_code: i32,
+    #[serde(rename = "status_code")]
+    pub(crate) _status_code: i32,
     #[serde(default)]
     pub(crate) confidence: f64,
 }

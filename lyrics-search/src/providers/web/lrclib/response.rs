@@ -2,11 +2,10 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub(crate) struct SearchResultItem {
     pub(crate) id: i32,
     #[serde(rename = "name")]
-    pub(crate) name: String,
+    pub(crate) _name: String,
     #[serde(rename = "trackName")]
     pub(crate) track_name: String,
     #[serde(rename = "artistName")]
@@ -14,20 +13,20 @@ pub(crate) struct SearchResultItem {
     #[serde(rename = "albumName")]
     pub(crate) album_name: String,
     pub(crate) duration: f64,
-    pub(crate) instrumental: bool,
+    #[serde(rename = "instrumental")]
+    pub(crate) _instrumental: bool,
     #[serde(rename = "plainLyrics")]
-    pub(crate) plain_lyrics: Option<String>,
+    pub(crate) _plain_lyrics: Option<String>,
     #[serde(rename = "syncedLyrics")]
-    pub(crate) synced_lyrics: Option<String>,
+    pub(crate) _synced_lyrics: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub(crate) struct GetLyricResult {
     pub(crate) id: i32,
     #[serde(rename = "name")]
-    pub(crate) name: String,
+    pub(crate) _name: String,
     #[serde(rename = "trackName")]
     pub(crate) track_name: String,
     #[serde(rename = "artistName")]
@@ -35,9 +34,10 @@ pub(crate) struct GetLyricResult {
     #[serde(rename = "albumName")]
     pub(crate) album_name: String,
     pub(crate) duration: f64,
-    pub(crate) instrumental: bool,
+    #[serde(rename = "instrumental")]
+    pub(crate) _instrumental: bool,
     #[serde(rename = "plainLyrics")]
-    pub(crate) plain_lyrics: Option<String>,
+    pub(crate) _plain_lyrics: Option<String>,
     #[serde(rename = "syncedLyrics")]
-    pub(crate) synced_lyrics: Option<String>,
+    pub(crate) _synced_lyrics: Option<String>,
 }
