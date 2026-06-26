@@ -12,10 +12,9 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
 license = "Apache-2.0"
 authors = ["ChouChiu"]
-repository = "https://github.com/ChouChiu/Lyricify-Lyrics-Helper"
+repository = "https://github.com/ChouChiu/Lyrics-Helper"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
