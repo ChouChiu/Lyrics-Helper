@@ -11,7 +11,7 @@ readme = "README.md"
 
 [dependencies]
 lyrics-core = { path = "../lyrics-core", version = "0.1.1" }
-lyrics-crypto = { path = "../lyrics-crypto", version = "0.1.1" }
+lyrics-crypto = { path = "../lyrics-crypto", version = "0.1.3" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
