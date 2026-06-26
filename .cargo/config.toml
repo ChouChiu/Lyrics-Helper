@@ -1,0 +1,2 @@
+[alias]
+doc-local = ["doc", "--no-deps", "--open"]

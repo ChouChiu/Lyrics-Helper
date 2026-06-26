@@ -9,6 +9,7 @@ pub(crate) async fn search(keyword: &str) -> Option<SearchResponse> {
     base_api::get_json(&url).await
 }
 
+/// 通过关键词、哈希值和时长搜索并获取酷狗歌词内容。
 pub async fn get_lyrics(keyword: &str, hash: &str, duration_ms: i32) -> Option<String> {
     let search_url = format!(
         "http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword={}&hash={}&timelength={}",

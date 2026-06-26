@@ -2,6 +2,7 @@ use regex::Regex;
 use lyrics_core::models::*;
 use crate::parsers::attributes_helper;
 
+/// 解析 Lyricify Syllable 格式歌词，支持背景人声检测和对齐信息，返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
     let input = input.trim_start_matches('\u{feff}');
     let mut lyrics_lines: Vec<String> = input.trim().lines().map(|s| s.to_string()).collect();
@@ -22,6 +23,7 @@ pub fn parse(input: &str) -> LyricsData {
     data
 }
 
+/// 解析 Lyricify Syllable 歌词行列表，处理背景人声和对齐信息，可选地应用时间偏移。
 pub fn parse_lyrics(lines: &[String], offset: Option<i32>) -> Vec<LineInfo> {
     let mut list: Vec<(LineInfo, Option<bool>)> = Vec::new();
 

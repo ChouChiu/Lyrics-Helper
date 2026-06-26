@@ -1,17 +1,23 @@
 use lyrics_core::models::*;
 use crate::SubLinesOutputType;
 
+/// LRC 格式中结束时间戳的输出策略。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EndTimeOutputType {
+    /// 不输出结束时间戳。
     None,
+    /// 仅在与下一行间隔超过 5 秒时输出结束时间戳。
     Huge,
+    /// 对所有行输出结束时间戳。
     All,
 }
 
+/// 将歌词数据生成为标准 LRC 格式字符串（使用默认选项）。
 pub fn generate(lyrics_data: &LyricsData) -> String {
     generate_with_options(lyrics_data, EndTimeOutputType::Huge, SubLinesOutputType::InMainLine)
 }
 
+/// 将歌词数据生成为标准 LRC 格式字符串，可自定义结束时间输出策略和子行输出方式。
 pub fn generate_with_options(
     lyrics_data: &LyricsData,
     end_time_output: EndTimeOutputType,

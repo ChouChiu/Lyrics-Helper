@@ -5,6 +5,7 @@ use super::search_result::SearchResult;
 use super::searcher::Searcher;
 use super::Searchers;
 
+/// Apple Music 歌词搜索器。
 pub struct AppleMusicSearcher {
     access_token: String,
     storefront: String,
@@ -12,6 +13,7 @@ pub struct AppleMusicSearcher {
 }
 
 impl AppleMusicSearcher {
+    /// 创建新的 Apple Music 搜索器，默认使用美国 storefront 和英语。
     pub fn new(access_token: String) -> Self {
         Self {
             access_token,

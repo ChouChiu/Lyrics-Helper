@@ -21,6 +21,7 @@ pub(crate) async fn search(keyword: &str) -> Option<SearchResponse> {
     base_api::get_json_with_headers(&url, &standard_headers()).await
 }
 
+/// 获取网易云音乐歌词，返回 `(原文歌词, 翻译歌词)` 元组。
 pub async fn get_lyrics(song_id: i64) -> Option<(Option<String>, Option<String>)> {
     let url = format!(
         "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1",

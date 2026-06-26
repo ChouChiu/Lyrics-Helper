@@ -15,18 +15,28 @@ use lyrics_core::models::TrackMetadata;
 use search_result::SearchResult;
 use searcher::Searcher;
 
+/// 支持的歌词搜索平台枚举。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Searchers {
+    /// QQ 音乐
     QQMusic,
+    /// 网易云音乐
     Netease,
+    /// 酷狗音乐
     Kugou,
+    /// Musixmatch
     Musixmatch,
+    /// 汽水音乐
     SodaMusic,
+    /// Apple Music
     AppleMusic,
+    /// Spotify
     Spotify,
+    /// LRCLIB
     LRCLIB,
 }
 
+/// 比较目标曲目元数据与搜索结果的匹配程度，返回匹配等级。
 pub fn compare_track(
     track: &TrackMetadata,
     result_title: Option<&str>,
@@ -88,6 +98,7 @@ pub fn compare_track(
     }
 }
 
+/// 比较目标曲目元数据与单条搜索结果的匹配程度，返回匹配等级。
 pub fn compare_track_result(track: &TrackMetadata, result: &SearchResult) -> MatchType {
     compare_track(
         track,
@@ -99,6 +110,7 @@ pub fn compare_track_result(track: &TrackMetadata, result: &SearchResult) -> Mat
     )
 }
 
+/// 根据曲目元数据构建搜索查询字符串（标题 + 艺术家 + 专辑）。
 pub fn build_search_string(track: &TrackMetadata) -> String {
     let title = track.title.as_deref().unwrap_or("");
     let artist = track.artist.as_deref().unwrap_or("").replace(", ", " ");
@@ -109,6 +121,7 @@ pub fn build_search_string(track: &TrackMetadata) -> String {
         .to_string()
 }
 
+/// 移除标题中的 featuring 标记（如 `(feat. xxx)` 或 ` - feat. xxx`）。
 pub fn strip_feat(title: &str) -> String {
     let mut new_title = title.to_string();
     if let Some(idx) = new_title.find("(feat.") {
@@ -120,6 +133,7 @@ pub fn strip_feat(title: &str) -> String {
     new_title
 }
 
+/// 根据曲目元数据构建渐进式搜索查询列表（从精确到宽泛）。
 pub fn build_refinement_queries(track: &TrackMetadata) -> Vec<String> {
     let title = track.title.as_deref().unwrap_or("");
     let new_title = strip_feat(title);
@@ -134,6 +148,9 @@ pub fn build_refinement_queries(track: &TrackMetadata) -> Vec<String> {
     vec![level1, level2]
 }
 
+/// 使用渐进式搜索策略搜索歌词，先尝试精确匹配，失败后逐步放宽搜索条件。
+///
+/// 返回按匹配度排序的搜索结果列表。
 pub async fn search_with_refinement(
     searcher: &dyn Searcher,
     track: &TrackMetadata,
@@ -194,6 +211,7 @@ pub async fn search_with_refinement(
     all_results
 }
 
+/// 搜索并返回匹配度最高的单条搜索结果。
 pub async fn search_for_best_result(
     searcher: &dyn Searcher,
     track: &TrackMetadata,
@@ -207,6 +225,7 @@ pub async fn search_for_best_result(
     results.into_iter().next()
 }
 
+/// 搜索并返回匹配度不低于指定等级的单条搜索结果，无满足条件的结果时返回 `None`。
 pub async fn search_for_best_result_with_match(
     searcher: &dyn Searcher,
     track: &TrackMetadata,

@@ -101,6 +101,7 @@ fn build_tree(reader: &mut Reader<&[u8]>, end_tag: &[u8]) -> Vec<XmlNode> {
     nodes
 }
 
+/// 解析 TTML（Timed Text Markup Language）格式歌词，支持逐音节同步、翻译和背景人声，返回 [`LyricsData`]。
 pub fn parse(ttml: &str) -> LyricsData {
     let mut data = LyricsData {
         track_metadata: Some(TrackMetadata::new()),

@@ -5,6 +5,7 @@ use super::search_result::SearchResult;
 use super::searcher::Searcher;
 use super::Searchers;
 
+/// 网易云音乐歌词搜索器。
 pub struct NeteaseSearcher;
 
 #[async_trait]

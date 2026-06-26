@@ -1,5 +1,8 @@
 use lyrics_core::models::*;
 
+/// 从歌词行列表开头提取通用属性（如 `[ar:xxx]`），填充到 [`LyricsData`] 中，并从行列表中移除属性行。
+///
+/// 返回解析到的时间偏移量（offset）。
 pub fn parse_general_attributes_to_lyrics_data_from_lines(
     data: &mut LyricsData,
     lines: &mut Vec<String>,
@@ -56,6 +59,9 @@ pub fn parse_general_attributes_to_lyrics_data_from_lines(
     offset
 }
 
+/// 从原始歌词字符串开头提取通用属性，填充到 [`LyricsData`] 中。
+///
+/// 返回时间偏移量和属性部分结束的字符索引。
 pub fn parse_general_attributes_to_lyrics_data(
     data: &mut LyricsData,
     input: &str,
@@ -112,11 +118,13 @@ pub fn parse_general_attributes_to_lyrics_data(
     (offset, index)
 }
 
+/// 判断一行文本是否为属性行（格式为 `[key:value]`）。
 pub fn is_attribute_line(line: &str) -> bool {
     let line = line.trim();
     line.starts_with('[') && line.ends_with(']') && line.contains(':')
 }
 
+/// 从属性行中提取键值对，返回 `(key, value)` 元组。
 pub fn get_attribute(line: &str) -> (String, String) {
     let line = line.trim();
     let key = between(line, "[", ":");

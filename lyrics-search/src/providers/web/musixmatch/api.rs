@@ -10,6 +10,7 @@ fn headers() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+/// 获取 Musixmatch 用户令牌（用于后续 API 调用）。
 pub async fn get_token() -> Option<String> {
     let url = format!("{}/token.get?app_id=web-desktop-app-v1.0", BASE_URL);
     let resp: TokenResponse = base_api::get_json_with_headers(&url, &headers()).await?;
@@ -31,6 +32,7 @@ pub(crate) async fn search_track(
     base_api::get_json_with_headers(&url, &headers()).await
 }
 
+/// 获取 Musixmatch 非同步歌词文本。
 pub async fn get_lyrics(track_id: i64, user_token: &str) -> Option<String> {
     let url = format!(
         "{}/track.lyrics.get?app_id=web-desktop-app-v1.0&usertoken={}&track_id={}",
@@ -40,6 +42,7 @@ pub async fn get_lyrics(track_id: i64, user_token: &str) -> Option<String> {
     resp.message?.body?.lyrics?.lyrics_body
 }
 
+/// 获取 Musixmatch 同步歌词（LRC 格式）。
 pub async fn get_synced_lyrics(track_id: i64, user_token: &str) -> Option<String> {
     let url = format!(
         "{}/track.subtitle.get?app_id=web-desktop-app-v1.0&usertoken={}&track_id={}&subtitle_format=lrc",

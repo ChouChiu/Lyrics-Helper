@@ -5,6 +5,7 @@ use super::search_result::SearchResult;
 use super::searcher::Searcher;
 use super::Searchers;
 
+/// QQ 音乐歌词搜索器。
 pub struct QQMusicSearcher;
 
 #[async_trait]

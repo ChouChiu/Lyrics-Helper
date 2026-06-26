@@ -1,5 +1,6 @@
 use lyrics_core::models::*;
 
+/// 将歌词数据生成为 Lyricify Syllable 逐字歌词格式字符串。
 pub fn generate(lyrics_data: &LyricsData) -> String {
     let mut result = String::new();
 

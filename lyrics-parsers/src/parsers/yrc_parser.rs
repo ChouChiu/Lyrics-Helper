@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use lyrics_core::models::*;
 
+/// YRC 信息行（如作词/作曲）的 JSON 结构。
 #[derive(Debug, Deserialize)]
 pub struct CreditsInfo {
     #[serde(rename = "t")]
@@ -9,6 +10,7 @@ pub struct CreditsInfo {
     pub credits: Vec<Credit>,
 }
 
+/// YRC 信息行中的单个条目（如一位作词人）。
 #[derive(Debug, Deserialize)]
 pub struct Credit {
     #[serde(rename = "tx")]
@@ -34,6 +36,7 @@ enum CurrentState {
     Lyric,
 }
 
+/// 解析 YRC 格式歌词，自动处理信息行（作词/作曲等）和逐音节歌词，返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
     let mut lyrics_data = LyricsData {
         file: Some(FileInfo {
@@ -139,6 +142,7 @@ pub fn parse(input: &str) -> LyricsData {
     lyrics_data
 }
 
+/// 解析 YRC 歌词内容，包含信息行和歌词行，返回歌词行列表。
 pub fn parse_lyrics(input: &str) -> Vec<LineInfo> {
     let mut lines: Vec<LineInfo> = Vec::new();
     let chars: Vec<char> = input.chars().collect();
@@ -195,6 +199,7 @@ pub fn parse_lyrics(input: &str) -> Vec<LineInfo> {
     lines
 }
 
+/// 仅解析 YRC 歌词行部分（不含信息行），返回逐音节歌词行列表。
 pub fn parse_only_lyrics(input: &str) -> Vec<LineInfo> {
     let mut lines: Vec<LineInfo> = Vec::new();
     let mut karaoke_word_infos: Vec<SyllableInfo> = Vec::new();

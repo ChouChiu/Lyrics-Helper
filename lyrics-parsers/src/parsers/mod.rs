@@ -11,6 +11,9 @@ pub mod lyricify_lines_parser;
 
 use lyrics_core::models::*;
 
+/// 根据指定的歌词原始类型解析歌词内容，返回解析后的 [`LyricsData`]。
+///
+/// 对于无法识别的类型（`Unknown`），返回 `None`。
 pub fn parse_lyrics(input: &str, raw_type: LyricsRawTypes) -> Option<LyricsData> {
     match raw_type {
         LyricsRawTypes::LyricifySyllable => Some(lyricify_syllable_parser::parse(input)),
@@ -27,6 +30,7 @@ pub fn parse_lyrics(input: &str, raw_type: LyricsRawTypes) -> Option<LyricsData>
     }
 }
 
+/// 自动检测歌词格式并解析歌词内容，返回解析后的 [`LyricsData`]。
 pub fn parse_lyrics_auto(input: &str) -> Option<LyricsData> {
     let raw_type = lyrics_core::helpers::type_helper::get_lyrics_types(input);
     parse_lyrics(input, raw_type)

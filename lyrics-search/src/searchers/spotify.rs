@@ -5,11 +5,13 @@ use super::search_result::SearchResult;
 use super::searcher::Searcher;
 use super::Searchers;
 
+/// Spotify 歌词搜索器。
 pub struct SpotifySearcher {
     access_token: String,
 }
 
 impl SpotifySearcher {
+    /// 创建新的 Spotify 搜索器。
     pub fn new(access_token: String) -> Self {
         Self { access_token }
     }

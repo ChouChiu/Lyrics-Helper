@@ -274,6 +274,7 @@ struct LyricsBody {
     request: LyricsRequestBody,
 }
 
+/// 获取 QQ 音乐歌词，返回 `(原文歌词, 翻译歌词)` 元组。
 pub async fn get_lyrics(
     song_mid: &str,
     song_id: Option<i64>,

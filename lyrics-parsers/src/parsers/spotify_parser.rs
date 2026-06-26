@@ -1,11 +1,13 @@
 use serde::Deserialize;
 use lyrics_core::models::*;
 
+/// Spotify Color Lyrics JSON 的顶层结构。
 #[derive(Debug, Deserialize)]
 pub struct SpotifyColorLyrics {
     pub lyrics: Option<SpotifyLyrics>,
 }
 
+/// Spotify 歌词数据，包含同步类型、歌词行和提供者信息。
 #[derive(Debug, Deserialize)]
 pub struct SpotifyLyrics {
     #[serde(rename = "syncType")]
@@ -23,6 +25,7 @@ pub struct SpotifyLyrics {
     pub alternatives: Option<Vec<AlternativeItem>>,
 }
 
+/// Spotify 歌词的单行数据，包含时间戳、文本和可选的音节信息。
 #[derive(Debug, Deserialize)]
 pub struct SpotifyLyricsLine {
     #[serde(rename = "startTimeMs", default)]
@@ -33,6 +36,7 @@ pub struct SpotifyLyricsLine {
     pub syllables: Option<Vec<SyllableItem>>,
 }
 
+/// Spotify 逐音节同步中的单个音节条目。
 #[derive(Debug, Deserialize)]
 pub struct SyllableItem {
     #[serde(rename = "startTimeMs", default)]
@@ -43,6 +47,7 @@ pub struct SyllableItem {
     pub chars_count: String,
 }
 
+/// Spotify 歌词的替代语言版本。
 #[derive(Debug, Deserialize)]
 pub struct AlternativeItem {
     pub language: Option<String>,
@@ -51,6 +56,7 @@ pub struct AlternativeItem {
     pub is_rtl_language: Option<bool>,
 }
 
+/// 解析 Spotify JSON 格式歌词，支持未同步、行同步和逐音节同步，返回 [`LyricsData`]。
 pub fn parse(raw_json: &str) -> Option<LyricsData> {
     let color_lyrics: SpotifyColorLyrics = serde_json::from_str(raw_json).ok()?;
     let lyrics = color_lyrics.lyrics?;

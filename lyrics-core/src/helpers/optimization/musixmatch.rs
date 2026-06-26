@@ -1,5 +1,6 @@
 use crate::models::LineInfo;
 
+/// 标准化 Musixmatch 格式歌词：移除首尾的空行。
 pub fn standardize_musixmatch_lyrics(lines: &mut Vec<LineInfo>) {
     // Remove empty lines at the beginning
     while let Some(first) = lines.first() {

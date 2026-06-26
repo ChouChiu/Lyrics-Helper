@@ -5,8 +5,10 @@ use super::search_result::SearchResult;
 use super::searcher::Searcher;
 use super::Searchers;
 
+/// 酷狗音乐歌词搜索器。
 pub struct KugouSearcher;
 
+/// 将艺术家字符串按逗号、顿号或斜杠拆分为列表。
 fn split_artists(singername: &str) -> Vec<String> {
     singername
         .split([',', '、', '/'])

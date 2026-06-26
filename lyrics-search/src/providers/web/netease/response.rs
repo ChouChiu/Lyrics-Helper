@@ -35,14 +35,20 @@ pub(crate) struct Album {
     pub(crate) name: String,
 }
 
+/// 网易云音乐歌词响应。
 #[derive(Debug, Clone, Deserialize)]
 pub struct LyricsResponse {
+    /// 响应状态码
     pub code: Option<i32>,
+    /// 原文歌词
     pub lrc: Option<LyricContent>,
+    /// 翻译歌词
     pub tlyric: Option<LyricContent>,
 }
 
+/// 网易云音乐歌词内容。
 #[derive(Debug, Clone, Deserialize)]
 pub struct LyricContent {
+    /// LRC 格式歌词文本
     pub lyric: Option<String>,
 }

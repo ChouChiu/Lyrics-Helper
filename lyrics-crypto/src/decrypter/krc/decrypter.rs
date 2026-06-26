@@ -8,6 +8,7 @@ const KRC_KEY: [u8; 16] = [
     0x51, 0x36, 0x31, 0x2d, 0xce, 0xd2, 0x6e, 0x69,
 ];
 
+/// KRC 格式歌词解密器，实现 `LyricsDecrypter` trait。
 pub struct KrcDecrypter;
 
 impl LyricsDecrypter for KrcDecrypter {
@@ -35,6 +36,9 @@ impl LyricsDecrypter for KrcDecrypter {
     }
 }
 
+/// 解密 KRC 加密歌词字符串（Base64 编码），返回解密后的明文歌词。
+///
+/// 解密流程：Base64 解码 → 跳过 4 字节魔数头 → XOR 解密 → Zlib 解压 → 去除首字节 → UTF-8 解码。
 pub fn decrypt_lyrics(encrypted_lyrics: &str) -> Option<String> {
     // Base64 decode
     let encrypted_bytes = base64::engine::general_purpose::STANDARD
@@ -67,6 +71,9 @@ pub fn decrypt_lyrics(encrypted_lyrics: &str) -> Option<String> {
     String::from_utf8(result.to_vec()).ok()
 }
 
+/// 从 KRC 文件的原始字节内容解密歌词，返回解密后的明文歌词。
+///
+/// 与 `decrypt_lyrics` 不同，此函数直接接收文件字节（非 Base64 编码）。
 pub fn decrypt_lyrics_from_file(file_content: &[u8]) -> Option<String> {
     // Skip first 4 bytes (magic header)
     if file_content.len() <= 4 {

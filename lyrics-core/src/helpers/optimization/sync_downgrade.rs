@@ -1,5 +1,6 @@
 use crate::models::LineInfo;
 
+/// 将音节级同步歌词降级为行级同步，将 `Syllable`/`FullSyllable` 转换为 `Line`/`FullLine`。
 pub fn downgrade_to_line_synced(lines: &mut [LineInfo]) {
     for line in lines.iter_mut() {
         match line {

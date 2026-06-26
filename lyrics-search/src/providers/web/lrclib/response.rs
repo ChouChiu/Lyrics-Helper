@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+/// LRCLIB 搜索结果条目。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResultItem {
@@ -15,6 +16,7 @@ pub struct SearchResultItem {
     pub synced_lyrics: Option<String>,
 }
 
+/// LRCLIB 歌词获取结果。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetLyricResult {

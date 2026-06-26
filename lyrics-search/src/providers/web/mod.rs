@@ -1,3 +1,5 @@
+//! 各平台 Web API 客户端实现。
+
 pub mod apple_music;
 pub mod base_api;
 pub mod kugou;

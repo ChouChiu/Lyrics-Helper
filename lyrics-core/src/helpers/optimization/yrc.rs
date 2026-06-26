@@ -1,5 +1,6 @@
 use crate::models::LineInfo;
 
+/// 标准化 YRC 格式歌词：移除末尾空格，将标点符号合并到前一个音节。
 pub fn standardize_yrc_lyrics(lines: &mut [LineInfo]) {
     for line in lines.iter_mut() {
         if let LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } = line {

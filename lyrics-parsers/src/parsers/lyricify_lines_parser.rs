@@ -1,6 +1,7 @@
 use lyrics_core::models::*;
 use crate::parsers::attributes_helper;
 
+/// 解析 Lyricify Lines 格式歌词（行同步），返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
     let input = input.replace("[type:LyricifyLines]", "");
     let mut lyrics_lines: Vec<String> = input.trim().lines().map(|s| s.to_string()).collect();
@@ -21,6 +22,7 @@ pub fn parse(input: &str) -> LyricsData {
     data
 }
 
+/// 解析 Lyricify Lines 歌词行列表，可选地应用时间偏移，返回行同步歌词列表。
 pub fn parse_lyrics(lines: &[String], offset: Option<i32>) -> Vec<LineInfo> {
     let offset = offset.unwrap_or(0);
     let mut lyrics_array = Vec::new();

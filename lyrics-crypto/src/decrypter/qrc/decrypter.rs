@@ -380,6 +380,9 @@ fn triple_des_crypt(input: &[u8], output: &mut [u8], key: &[DesSchedule; 3]) {
     output.copy_from_slice(&buf);
 }
 
+/// 解密 QRC 加密歌词字符串，返回解密后的明文歌词。
+///
+/// 解密流程：去除空白 → 十六进制解码 → Triple DES 解密 → Zlib 解压 → UTF-8 解码。
 pub fn decrypt_lyrics(encrypted_lyrics: &str) -> Option<String> {
     let encrypted = encrypted_lyrics.replace(|c: char| c.is_whitespace(), "");
     let encrypted_bytes = hex_to_bytes(&encrypted)?;

@@ -3,11 +3,13 @@ use serde::Deserialize;
 use lyrics_core::models::*;
 use crate::parsers::attributes_helper;
 
+/// 酷狗 KRC 翻译数据的顶层结构。
 #[derive(Debug, Deserialize)]
 pub struct KugouTranslation {
     pub content: Option<Vec<KugouTranslationContent>>,
 }
 
+/// 酷狗 KRC 翻译内容条目，包含翻译类型和逐行歌词内容。
 #[derive(Debug, Deserialize)]
 pub struct KugouTranslationContent {
     #[serde(rename = "type")]
@@ -16,6 +18,7 @@ pub struct KugouTranslationContent {
     pub lyric_content: Option<Vec<Option<Vec<String>>>>,
 }
 
+/// 解析 KRC 格式歌词，自动提取属性、翻译和逐音节信息，返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
     let mut lyrics_lines = get_splited_krc(input);
     let mut data = LyricsData {
@@ -64,6 +67,7 @@ pub fn parse(input: &str) -> LyricsData {
     data
 }
 
+/// 仅解析 KRC 歌词内容（不含属性行），返回包含翻译的歌词行列表。
 pub fn parse_lyrics(input: &str) -> Vec<LineInfo> {
     let lyrics_lines = get_splited_krc_without_info_line(input);
     let mut lyrics = parse_lyrics_from_lines(&lyrics_lines, None);
@@ -99,6 +103,7 @@ pub fn parse_lyrics(input: &str) -> Vec<LineInfo> {
     lyrics
 }
 
+/// 从预分割的 KRC 歌词行列表解析歌词，可选地应用时间偏移。
 pub fn parse_lyrics_from_lines(lyrics_lines: &[String], offset: Option<i32>) -> Vec<LineInfo> {
     let mut lyrics: Vec<LineInfo> = Vec::new();
 
@@ -119,6 +124,7 @@ pub fn parse_lyrics_from_lines(lyrics_lines: &[String], offset: Option<i32>) -> 
     lyrics
 }
 
+/// 将 KRC 原始文本按行分割，仅保留以 `[` 开头的有效歌词行。
 pub fn get_splited_krc(krc: &str) -> Vec<String> {
     let binding = krc.replace("\r\n", "\n").replace('\r', "");
     let lines: Vec<&str> = binding.split('\n').collect();
@@ -132,6 +138,7 @@ pub fn get_splited_krc(krc: &str) -> Vec<String> {
     result.replace("\r\n", "\n").replace('\r', "").split('\n').map(|s| s.to_string()).collect()
 }
 
+/// 将 KRC 原始文本按行分割，仅保留带时间戳的歌词行（不含属性信息行）。
 pub fn get_splited_krc_without_info_line(krc: &str) -> Vec<String> {
     let binding = krc.replace("\r\n", "\n").replace('\r', "");
     let lines: Vec<&str> = binding.split('\n').collect();
@@ -148,6 +155,7 @@ pub fn get_splited_krc_without_info_line(krc: &str) -> Vec<String> {
     result.replace("\r\n", "\n").replace('\r', "").split('\n').map(|s| s.to_string()).collect()
 }
 
+/// 解析单行 KRC 歌词，提取逐音节时间信息，返回单个 [`LineInfo`]。
 pub fn parse_lyrics_line(line: &str) -> Option<LineInfo> {
     let bracket_end = line.find(']')?;
     let after_bracket = &line[bracket_end + 1..];
@@ -198,6 +206,7 @@ pub fn parse_lyrics_line(line: &str) -> Option<LineInfo> {
     Some(LineInfo::new_syllable(syllables))
 }
 
+/// 检查 KRC 歌词是否包含翻译内容（通过 base64 编码的 `[language]` 标签）。
 pub fn check_krc_translation(krc: &str) -> bool {
     if !krc.contains("[language:") {
         return false;
@@ -226,6 +235,7 @@ pub fn check_krc_translation(krc: &str) -> bool {
     translation.content.as_ref().is_some_and(|c| !c.is_empty())
 }
 
+/// 从 KRC 歌词中提取翻译文本列表（逐行翻译）。
 pub fn get_translation_from_krc(krc: &str) -> Option<Vec<String>> {
     if !krc.contains("[language:") {
         return None;
@@ -257,6 +267,7 @@ pub fn get_translation_from_krc(krc: &str) -> Option<Vec<String>> {
     Some(result)
 }
 
+/// 从 KRC 歌词中提取原始翻译结构体 [`KugouTranslation`]。
 pub fn get_translation_raw_from_krc(krc: &str) -> Option<KugouTranslation> {
     if !krc.contains("[language:") {
         return None;

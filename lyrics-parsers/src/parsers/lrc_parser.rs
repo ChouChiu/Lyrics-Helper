@@ -248,6 +248,7 @@ fn parse_core(input: &str, collect_attributes: bool) -> ParseCoreResult {
     }
 }
 
+/// 解析 LRC 格式歌词，返回包含完整元数据和属性信息的 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
     let result = parse_core(input, true);
 
@@ -265,6 +266,7 @@ pub fn parse(input: &str) -> LyricsData {
     }
 }
 
+/// 仅解析 LRC 格式的歌词行，不提取属性信息，返回歌词行列表。
 pub fn parse_lyrics(input: &str) -> Vec<LineInfo> {
     let result = parse_core(input, false);
     result.lines

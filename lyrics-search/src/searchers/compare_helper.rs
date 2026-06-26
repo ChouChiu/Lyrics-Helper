@@ -1,15 +1,24 @@
 use lyrics_core::helpers::chinese_helper::to_simplified;
 use lyrics_core::helpers::string_helper::{compute_text_same, remove_duo_spaces};
 
+/// 曲目匹配等级，用于评估搜索结果与目标曲目的相似程度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MatchType {
+    /// 不匹配
     NoMatch = -1,
+    /// 极低匹配度
     VeryLow = 10,
+    /// 低匹配度
     Low = 30,
+    /// 中等匹配度
     Medium = 70,
+    /// 较高匹配度
     PrettyHigh = 90,
+    /// 高匹配度
     High = 95,
+    /// 极高匹配度
     VeryHigh = 99,
+    /// 完全匹配
     Perfect = 100,
 }
 
@@ -25,17 +34,25 @@ impl Ord for MatchType {
     }
 }
 
+/// 名称匹配等级。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameMatchType {
+    /// 不匹配
     NoMatch = -1,
+    /// 低匹配度
     Low = 0,
+    /// 中等匹配度
     Medium = 1,
+    /// 高匹配度
     High = 2,
+    /// 极高匹配度
     VeryHigh = 3,
+    /// 完全匹配
     Perfect = 4,
 }
 
 impl NameMatchType {
+    /// 返回该匹配等级对应的分值。
     pub fn score(self) -> f64 {
         match self {
             NameMatchType::Perfect => 7.0,
@@ -48,17 +65,25 @@ impl NameMatchType {
     }
 }
 
+/// 艺术家匹配等级。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtistMatchType {
+    /// 不匹配
     NoMatch = -1,
+    /// 低匹配度
     Low = 0,
+    /// 中等匹配度
     Medium = 1,
+    /// 高匹配度
     High = 2,
+    /// 极高匹配度
     VeryHigh = 3,
+    /// 完全匹配
     Perfect = 4,
 }
 
 impl ArtistMatchType {
+    /// 返回该匹配等级对应的分值。
     pub fn score(self) -> f64 {
         match self {
             ArtistMatchType::Perfect => 7.0,
@@ -71,17 +96,25 @@ impl ArtistMatchType {
     }
 }
 
+/// 时长匹配等级。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DurationMatchType {
+    /// 不匹配
     NoMatch = -1,
+    /// 低匹配度
     Low = 0,
+    /// 中等匹配度
     Medium = 1,
+    /// 高匹配度
     High = 2,
+    /// 极高匹配度
     VeryHigh = 3,
+    /// 完全匹配
     Perfect = 4,
 }
 
 impl DurationMatchType {
+    /// 返回该匹配等级对应的分值。
     pub fn score(self) -> f64 {
         match self {
             DurationMatchType::Perfect => 7.0,
@@ -94,18 +127,22 @@ impl DurationMatchType {
     }
 }
 
+/// 计算名称匹配类型的分值，`None` 时返回 0。
 pub fn name_score(m: Option<NameMatchType>) -> f64 {
     m.map_or(0.0, |m| m.score())
 }
 
+/// 计算艺术家匹配类型的分值，`None` 时返回 0。
 pub fn artist_score(m: Option<ArtistMatchType>) -> f64 {
     m.map_or(0.0, |m| m.score())
 }
 
+/// 计算时长匹配类型的分值，`None` 时返回 0。
 pub fn duration_score(m: Option<DurationMatchType>) -> f64 {
     m.map_or(0.0, |m| m.score())
 }
 
+/// 比较两个时长值（毫秒）的匹配程度。
 pub fn compare_duration(d1: Option<i32>, d2: Option<i32>) -> Option<DurationMatchType> {
     let d1 = d1?;
     let d2 = d2?;
@@ -123,6 +160,7 @@ pub fn compare_duration(d1: Option<i32>, d2: Option<i32>) -> Option<DurationMatc
     })
 }
 
+/// 比较两组艺术家列表的匹配程度，支持繁简中文转换。
 pub fn compare_artist(artist1: &[String], artist2: &[String]) -> Option<ArtistMatchType> {
     if artist1.is_empty() || artist2.is_empty() {
         return None;
@@ -186,6 +224,7 @@ pub fn compare_artist(artist1: &[String], artist2: &[String]) -> Option<ArtistMa
     Some(ArtistMatchType::NoMatch)
 }
 
+/// 计算两个字符串在相同位置上字符相等的数量。
 pub fn chars_eq_at(s1: &str, s2: &str) -> usize {
     s1.chars()
         .zip(s2.chars())
@@ -193,6 +232,7 @@ pub fn chars_eq_at(s1: &str, s2: &str) -> usize {
         .count()
 }
 
+/// 比较两个名称（标题或专辑）的匹配程度，支持繁简中文和特殊标记容错。
 pub fn compare_name(name1: Option<&str>, name2: Option<&str>) -> Option<NameMatchType> {
     let name1 = name1?;
     let name2 = name2?;

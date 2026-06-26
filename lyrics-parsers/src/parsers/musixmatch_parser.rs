@@ -3,6 +3,7 @@ use serde_json::Value;
 use lyrics_core::models::*;
 use crate::parsers::lrc_parser;
 
+/// Musixmatch 逐音节同步（richsync）的单行数据。
 #[derive(Debug, Deserialize)]
 pub struct RichSyncedLine {
     #[serde(rename = "ts")]
@@ -15,6 +16,7 @@ pub struct RichSyncedLine {
     pub text: Option<String>,
 }
 
+/// Musixmatch richsync 中的单个词/字符及其时间偏移。
 #[derive(Debug, Deserialize)]
 pub struct RichSyncWord {
     #[serde(rename = "c")]
@@ -23,10 +25,14 @@ pub struct RichSyncWord {
     pub position: f64,
 }
 
+/// 解析 Musixmatch JSON 格式歌词，按优先级尝试 richsync、subtitles 和 unsynced，返回 [`LyricsData`]。
 pub fn parse(raw_json: &str) -> Option<LyricsData> {
     parse_inner(raw_json, false)
 }
 
+/// 解析 Musixmatch JSON 格式歌词，可选择忽略逐音节数据。
+///
+/// `ignore_syllable` 为 `true` 时跳过 richsync 解析，直接尝试 subtitles。
 pub fn parse_inner(raw_json: &str, ignore_syllable: bool) -> Option<LyricsData> {
     let json_obj: Value = serde_json::from_str(raw_json).ok()?;
     let calls = json_obj.get("message")?.get("body")?.get("macro_calls")?;

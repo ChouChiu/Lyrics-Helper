@@ -6,6 +6,7 @@ use super::search_result::SearchResult;
 use super::searcher::Searcher;
 use super::Searchers;
 
+/// Musixmatch 歌词搜索器。
 pub struct MusixmatchSearcher;
 
 #[async_trait]

@@ -1,3 +1,18 @@
+//! Lyricify 歌词助手 —— 统一的歌词解析、生成、解密和搜索门面库。
+//!
+//! 本 crate 聚合了底层各子 crate 的功能，提供简洁的顶层 API。
+//!
+//! # 示例
+//!
+//! ```rust,no_run
+//! use lyrics_helper::{parse_auto, generate_string, LyricsTypes};
+//!
+//! let lrc_text = "[00:01.00]Hello World";
+//! let lyrics = parse_auto(lrc_text).unwrap();
+//! let output = generate_string(&lyrics, LyricsTypes::Lrc).unwrap();
+//! assert!(output.contains("Hello World"));
+//! ```
+
 pub use lyrics_core::*;
 pub use lyrics_parsers as parsers;
 pub use lyrics_generators as generators;

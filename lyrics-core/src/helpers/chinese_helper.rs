@@ -320,12 +320,14 @@ static CHT_TO_CHS_MAP: Lazy<HashMap<char, char>> = Lazy::new(|| {
     m
 });
 
+/// 将繁体中文文本转换为简体中文。
 pub fn to_simplified(text: &str) -> String {
     text.chars()
         .map(|c| CHT_TO_CHS_MAP.get(&c).copied().unwrap_or(c))
         .collect()
 }
 
+/// 将简体中文文本转换为繁体中文。
 pub fn to_traditional(text: &str) -> String {
     text.chars()
         .map(|c| CHS_TO_CHT_MAP.get(&c).copied().unwrap_or(c))

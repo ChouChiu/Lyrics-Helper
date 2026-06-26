@@ -1,5 +1,6 @@
 use crate::models::LineInfo;
 
+/// 移除歌词行开头的 explicit 标记（如 `🅴` 或 `[E]`）。
 pub fn remove_explicit_markers(lines: &mut [LineInfo]) {
     for line in lines.iter_mut() {
         let text = match line {
@@ -17,6 +18,7 @@ pub fn remove_explicit_markers(lines: &mut [LineInfo]) {
     }
 }
 
+/// 判断文本是否包含 explicit 标记（`🅴` 或 `[E]`）。
 pub fn has_explicit_marker(text: &str) -> bool {
     text.contains("🅴") || text.contains("[E]")
 }
