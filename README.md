@@ -35,14 +35,19 @@ fn main() {
 use lyrics_helper::{parse, generate_string, LyricsRawTypes, LyricsTypes};
 
 fn main() {
-    let lrc_content = "[00:12.00]Hello World\n[00:15.50]Second line";
-    let data = parse(lrc_content, LyricsRawTypes::Lrc).unwrap();
+    // QRC 是带音节时间的逐字格式
+    let qrc_content = "[0,1500]Hello(0,500) (500,500)World(1000,500)";
+    let data = parse(qrc_content, LyricsRawTypes::Qrc).unwrap();
 
-    // LRC → QRC
-    let qrc_output = generate_string(&data, LyricsTypes::Qrc).unwrap();
-    println!("{}", qrc_output);
+    // QRC → LRC
+    let lrc_output = generate_string(&data, LyricsTypes::Lrc).unwrap();
+    println!("{}", lrc_output);
 }
 ```
+
+注意方向性：QRC / KRC / YRC 的生成器只输出带音节的行，因此逐字歌词可以降级为
+逐行的 LRC，反过来用 LRC 生成 QRC 只会得到空字符串（`generate_string` 返回
+`None`）。需要反向转换时，得先用 QRC / KRC / YRC / TTML 等含音节的输入解析。
 
 运行完整示例（从 workspace 根目录）：
 
@@ -74,10 +79,16 @@ let start = syllables[0].start_time();
 需要拿回扁平的 `SyllableInfo` 序列时（例如自己生成逐字格式）：
 
 ```rust
-use lyrics_helper::{flatten_syllable_items, to_syllable_items};
+use lyrics_helper::{
+    flatten_syllable_items, to_syllable_items, SyllableInfo, SyllableItem,
+};
+
+let syllables = vec![SyllableItem::from(SyllableInfo::new("Hello".to_string(), 0, 500))];
 
 let flat = flatten_syllable_items(&syllables);   // Vec<SyllableItem> -> Vec<SyllableInfo>
 let items = to_syllable_items(flat);             // 反向包装
+
+assert_eq!(items.len(), 1);
 ```
 
 单个音节项也可以用 `parts()` 取到不分配的 `&[SyllableInfo]`。就地修改
@@ -189,14 +200,17 @@ use lyrics_helper::LyricsRawTypes;
 use lyrics_helper::search::providers::web::netease;
 
 // 逐字歌词：eapi 接口返回的 YRC 文本（含信息行），可直接按 LyricsRawTypes::Yrc 解析
-if let Some(lyrics) = netease::api::get_syllable_lyrics(423997333).await
+// Ok(None) 表示该曲目没有逐字歌词（不是错误），此时可回退到下面的逐行歌词
+if let Ok(Some(lyrics)) = netease::api::get_syllable_lyrics(423997333).await
     && let Some(yrc) = lyrics.yrc
 {
-    let parsed = lyrics_helper::parse(&yrc, LyricsRawTypes::Yrc);
+    let _parsed = lyrics_helper::parse(&yrc, LyricsRawTypes::Yrc);
 }
 
 // 逐行歌词：旧接口返回的 LRC 文本与翻译；曲目没有逐字歌词时可用它回退
-let (lrc, translation) = netease::api::get_lyrics(423997333).await.unwrap();
+if let Ok((lrc, translation)) = netease::api::get_lyrics(423997333).await {
+    println!("{lrc:?} {translation:?}");
+}
 ```
 
 ## 歌词处理优化

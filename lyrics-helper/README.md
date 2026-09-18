@@ -35,21 +35,26 @@ fn main() {
 use lyrics_helper::{parse, generate_string, LyricsRawTypes, LyricsTypes};
 
 fn main() {
-    let lrc_content = "[00:12.00]Hello World\n[00:15.50]Second line";
-    let data = parse(lrc_content, LyricsRawTypes::Lrc).unwrap();
+    // QRC 是带音节时间的逐字格式
+    let qrc_content = "[0,1500]Hello(0,500) (500,500)World(1000,500)";
+    let data = parse(qrc_content, LyricsRawTypes::Qrc).unwrap();
 
-    // LRC → QRC
-    let qrc_output = generate_string(&data, LyricsTypes::Qrc).unwrap();
-    println!("{}", qrc_output);
+    // QRC → LRC
+    let lrc_output = generate_string(&data, LyricsTypes::Lrc).unwrap();
+    println!("{}", lrc_output);
 }
 ```
+
+注意方向性：QRC / KRC / YRC 的生成器只输出带音节的行，因此逐字歌词可以降级为
+逐行的 LRC，反过来用 LRC 生成 QRC 只会得到空字符串（`generate_string` 返回
+`None`）。需要反向转换时，得先用 QRC / KRC / YRC / TTML 等含音节的输入解析。
 
 运行完整示例（从 workspace 根目录）：
 
 ```bash
 cargo run --example demo -- parsers-demo
 cargo run --example demo -- parse lyrics-helper/tests/test_data/LrcDemo.txt lrc
-cargo run --example demo -- generate lyrics-helper/tests/test_data/LrcDemo.txt lrc qrc
+cargo run --example demo -- generate lyrics-helper/tests/test_data/QrcDemo.txt qrc lrc
 ```
 
 ## 从 0.1 升级到 0.2
@@ -74,10 +79,16 @@ let start = syllables[0].start_time();
 需要拿回扁平的 `SyllableInfo` 序列时（例如自己生成逐字格式）：
 
 ```rust
-use lyrics_helper::{flatten_syllable_items, to_syllable_items};
+use lyrics_helper::{
+    flatten_syllable_items, to_syllable_items, SyllableInfo, SyllableItem,
+};
+
+let syllables = vec![SyllableItem::from(SyllableInfo::new("Hello".to_string(), 0, 500))];
 
 let flat = flatten_syllable_items(&syllables);   // Vec<SyllableItem> -> Vec<SyllableInfo>
 let items = to_syllable_items(flat);             // 反向包装
+
+assert_eq!(items.len(), 1);
 ```
 
 单个音节项也可以用 `parts()` 取到不分配的 `&[SyllableInfo]`。就地修改
@@ -159,7 +170,6 @@ assert!(a.start_time() == b.start_time() && a.end_time() == b.end_time());
 `LineInfo` 的 `PartialEq`/`Ord`（只比开始时间）保留不动——它是给排序用的，
 对应上游 C# 的 `IComparable`。
 
-
 ## 支持的格式
 
 | 功能 | 格式 |
@@ -168,6 +178,54 @@ assert!(a.start_time() == b.start_time() && a.end_time() == b.end_time());
 | **生成** | Lyricify Syllable, Lyricify Lines, LRC, QRC, KRC, YRC |
 | **解密** | QRC, KRC |
 | **搜索** | QQ 音乐, 网易云音乐, 酷狗音乐, 汽水音乐, Apple Music, Musixmatch, LRCLIB, Spotify |
+
+除上述歌词格式外，`helpers::type_helper` 还能识别 QRC XML、网易云完整 YRC JSON 与 Apple Music API JSON 等原始封装类型：
+
+```rust
+use lyrics_helper::helpers::type_helper::{get_lyrics_types, is_qrc_full, try_parse_raw_type};
+use lyrics_helper::LyricsRawTypes;
+
+let raw = /* 平台原始响应 */ "";
+let raw_type = get_lyrics_types(raw);      // -> LyricsRawTypes（未知格式返回 Unknown）
+let parsed = try_parse_raw_type("qrc (xml)"); // -> Some(LyricsRawTypes::QrcFull)
+```
+
+注意：与上游一致，`parse_lyrics` 不解析这些外层封装（返回 `None`），需要调用方先取出内嵌歌词；
+仓库内的各平台 Provider 已经完成这一步（如 QQ 音乐会自动展开 QRC XML）。
+
+各平台的在线歌词接口位于 `search::providers::web`，如网易云音乐同时提供逐行与逐字歌词：
+
+```rust
+use lyrics_helper::LyricsRawTypes;
+use lyrics_helper::search::providers::web::netease;
+
+// 逐字歌词：eapi 接口返回的 YRC 文本（含信息行），可直接按 LyricsRawTypes::Yrc 解析
+// Ok(None) 表示该曲目没有逐字歌词（不是错误），此时可回退到下面的逐行歌词
+if let Ok(Some(lyrics)) = netease::api::get_syllable_lyrics(423997333).await
+    && let Some(yrc) = lyrics.yrc
+{
+    let _parsed = lyrics_helper::parse(&yrc, LyricsRawTypes::Yrc);
+}
+
+// 逐行歌词：旧接口返回的 LRC 文本与翻译；曲目没有逐字歌词时可用它回退
+if let Ok((lrc, translation)) = netease::api::get_lyrics(423997333).await {
+    println!("{lrc:?} {translation:?}");
+}
+```
+
+## 歌词处理优化
+
+`helpers::optimization` 提供与上游一一对应的优化函数：
+
+| 模块 | 作用 |
+|------|------|
+| `syllable_word_merger` | 把同一单词内的连续音节合并为合并音节（保留各子音节时间） |
+| `apple_music` | Apple Music TTML 歌词预处理与大小写规范化 |
+| `info_lines` | 制作人员等「信息行」识别与首尾计数 |
+| `musixmatch` | Musixmatch richsync 歌词标准化 |
+| `sync_downgrade` | 逐字歌词降级为逐行 |
+| `yrc` | YRC 歌词标准化 |
+| `explicit` | explicit 标记处理与修复 |
 
 搜索功能需要启用 `search` feature（默认启用），依赖 `reqwest` 和 `tokio`。如需纯离线解析库，禁用默认 features：
 

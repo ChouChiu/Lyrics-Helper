@@ -18,6 +18,7 @@
 ```toml
 [dependencies]
 lyrics-search = "0.3"
+lyrics-core = "0.3"
 ```
 
 需要启用 `search` feature（默认启用），依赖 `reqwest` 和 `tokio`。
@@ -25,6 +26,9 @@ lyrics-search = "0.3"
 ## 使用
 
 通常不需要直接依赖此 crate，建议使用门面库 `lyrics-helper`。
+
+直接依赖 `lyrics-search` 时，搜索接口使用的 `TrackMetadata` 来自 `lyrics-core`，
+因此 `lyrics-core` 需要一并引入（上面的 `[dependencies]` 已列出）。
 
 各平台搜索结果统一由 `Searcher` trait 给出，失败原因通过类型化错误暴露：
 

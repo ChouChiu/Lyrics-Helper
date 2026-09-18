@@ -29,8 +29,13 @@ lyrics-parsers = "0.3"
 ```rust
 use lyrics_helper::parse_auto;
 
-let data = parse_auto("[00:12.00]Hello World").unwrap();
+let data = parse_auto("[00:12.00]Hello World").expect("无法识别歌词格式");
+println!("解析出 {} 行歌词", data.lines.unwrap_or_default().len());
 ```
+
+上面的示例通过门面库调用，因此还需要依赖 `lyrics-helper`；只依赖 `lyrics-parsers`
+时可调用 `lyrics_parsers::parsers::parse_lyrics_auto`（或
+`lyrics_parsers::parsers::parse_lyrics` 指定格式）。
 
 ## 许可证
 
