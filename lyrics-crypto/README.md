@@ -1,11 +1,12 @@
 # lyrics-crypto
 
-歌词解密库，提供 QRC 和 KRC 格式加密歌词的解密功能。
+歌词加解密库，提供 QRC、KRC 格式加密歌词的解密与网易云音乐 eapi 接口参数加密。
 
-## 支持的解密
+## 支持的功能
 
 - **QRC**：AES/ECB 解密 + gzip 解压
 - **KRC**：DES/ECB 解密 + zlib 解压
+- **网易云音乐 eapi**：`params` 参数加密（MD5 摘要 + AES-128-ECB）
 
 ## 依赖
 
