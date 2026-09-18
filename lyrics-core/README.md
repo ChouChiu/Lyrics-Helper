@@ -6,7 +6,7 @@ Lyricify 歌词核心库，提供歌词处理的基础类型、traits 和辅助�
 
 本 crate 是 Lyricify 歌词工具链的基础层，定义了：
 
-- **模型**：`LyricsData`、`LineInfo`、`SyllableInfo`、`TrackMetadata` 及相关枚举
+- **模型**：`LyricsData`、`LineInfo`、`SyllableItem`/`SyllableInfo`/`FullSyllableInfo`、`TrackMetadata` 及相关枚举
 - **Traits**：`LyricsParser`、`LyricsGenerator`、`LyricsDecrypter`
 - **辅助工具**：中文处理、字符串操作、数学计算、时间偏移、格式检测、优化等
 
@@ -14,7 +14,7 @@ Lyricify 歌词核心库，提供歌词处理的基础类型、traits 和辅助�
 
 ```toml
 [dependencies]
-lyrics-core = "0.1"
+lyrics-core = "0.2"
 ```
 
 ## 使用
@@ -23,7 +23,7 @@ lyrics-core = "0.1"
 
 ```toml
 [dependencies]
-lyrics-helper = "0.1"
+lyrics-helper = "0.2"
 ```
 
 ## 许可证

@@ -8,7 +8,7 @@ Rust 歌词工具库，支持解析、生成、解密、搜索多种歌词格式
 
 ```toml
 [dependencies]
-lyrics-helper = "0.1"
+lyrics-helper = "0.2"
 ```
 
 自动检测格式并解析歌词：
@@ -52,6 +52,37 @@ cargo run --example demo -- parse lyrics-helper/tests/test_data/LrcDemo.txt lrc
 cargo run --example demo -- generate lyrics-helper/tests/test_data/LrcDemo.txt lrc qrc
 ```
 
+## 从 0.1 升级到 0.2
+
+0.2.0 改变了逐字歌词的音节模型：`LineInfo::Syllable` 与 `LineInfo::FullSyllable`
+的 `syllables` 字段由 `Vec<SyllableInfo>` 变为 `Vec<SyllableItem>`，对应上游 C# 的
+`ISyllableInfo`。同一单词内被合并的音节表示为 `SyllableItem::Full(FullSyllableInfo)`，
+它保留各子音节各自的时间信息，聚合文本与首尾时间由子项推导。
+
+只读取文本或时间的代码改动很小，把字段访问换成同名方法即可：
+
+```rust
+// 0.1
+let text = &syllables[0].text;
+let start = syllables[0].start_time;
+
+// 0.2
+let text = syllables[0].text();
+let start = syllables[0].start_time();
+```
+
+需要拿回扁平的 `SyllableInfo` 序列时（例如自己生成逐字格式）：
+
+```rust
+use lyrics_helper::{flatten_syllable_items, to_syllable_items};
+
+let flat = flatten_syllable_items(&syllables);   // Vec<SyllableItem> -> Vec<SyllableInfo>
+let items = to_syllable_items(flat);             // 反向包装
+```
+
+单个音节项也可以用 `parts()` 取到不分配的 `&[SyllableInfo]`。就地修改
+`FullSyllableInfo` 的子音节后，必须调用 `refresh_properties()` 让缓存失效。
+
 ## 支持的格式
 
 | 功能 | 格式 |
@@ -64,7 +95,7 @@ cargo run --example demo -- generate lyrics-helper/tests/test_data/LrcDemo.txt l
 搜索功能需要启用 `search` feature（默认启用），依赖 `reqwest` 和 `tokio`。如需纯离线解析库，禁用默认 features：
 
 ```toml
-lyrics-helper = { version = "0.1", default-features = false }
+lyrics-helper = { version = "0.2", default-features = false }
 ```
 
 ## 项目架构
@@ -76,7 +107,7 @@ Lyricify-Lyrics-Helper/          # workspace 根目录
 ├── Cargo.toml                   # workspace 定义
 ├── lyrics-core/                 # 核心模型与 traits
 │   └── src/
-│       ├── models/              # LyricsData, LineInfo, SyllableInfo, TrackMetadata, 枚举
+│       ├── models/              # LyricsData, LineInfo, SyllableItem, TrackMetadata, 枚举
 │       ├── traits/              # LyricsParser, LyricsGenerator, LyricsDecrypter
 │       └── helpers/             # chinese, string, math, offset, type detection, optimization
 ├── lyrics-parsers/              # 每种格式一个解析器
@@ -87,11 +118,12 @@ Lyricify-Lyrics-Helper/          # workspace 根目录
 │   ├── tests/
 │   │   ├── parser_tests.rs      # 集成测试
 │   │   └── test_data/           # 各格式示例歌词文件
+│   ├── examples/
+│   │   ├── demo.rs              # 解析/生成/解密演示
+│   │   ├── search_test.rs       # 搜索 API 演示
+│   │   └── search_lyrics_test.rs # 搜索+获取歌词演示
 │   └── src/lib.rs               # 顶层 API：parse, parse_auto, generate_string
-└── examples/
-    ├── demo.rs                  # 解析/生成/解密演示
-    ├── search_test.rs           # 搜索 API 演示
-    └── search_lyrics_test.rs    # 搜索+获取歌词演示
+└── AGENTS.md
 ```
 
 **依赖关系**：`lyrics-core` ← `lyrics-parsers` / `lyrics-generators` / `lyrics-crypto` ← `lyrics-search` ← `lyrics-helper`

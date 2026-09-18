@@ -12,7 +12,7 @@
 
 ```toml
 [dependencies]
-lyrics-crypto = "0.1"
+lyrics-crypto = "0.2"
 ```
 
 ## 使用

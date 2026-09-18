@@ -15,7 +15,7 @@
 
 ```toml
 [dependencies]
-lyrics-generators = "0.1"
+lyrics-generators = "0.2"
 ```
 
 ## 使用

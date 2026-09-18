@@ -4,10 +4,10 @@
 
 ## 支持的平台
 
-- QQ 音乐
-- 网易云音乐
-- 酷狗音乐
-- 汽水音乐
+- QQ 音乐（歌词及翻译）
+- 网易云音乐（逐行 LRC 与逐字 YRC 歌词）
+- 酷狗音乐（KRC 逐字歌词）
+- 汽水音乐（曲目详情歌词）
 - Apple Music
 - Musixmatch
 - LRCLIB
@@ -17,7 +17,7 @@
 
 ```toml
 [dependencies]
-lyrics-search = "0.1"
+lyrics-search = "0.2"
 ```
 
 需要启用 `search` feature（默认启用），依赖 `reqwest` 和 `tokio`。
