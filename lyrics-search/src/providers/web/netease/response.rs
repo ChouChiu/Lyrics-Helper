@@ -52,3 +52,14 @@ pub struct LyricContent {
     /// LRC 格式歌词文本
     pub lyric: Option<String>,
 }
+
+/// 网易云音乐 eapi 逐字歌词响应，对应 C# `Api.GetLyricNew` 的返回体。
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SyllableLyricsResponse {
+    /// 逐字歌词（YRC）
+    pub(crate) yrc: Option<LyricContent>,
+    /// 逐字翻译歌词（YRC）
+    pub(crate) ytlrc: Option<LyricContent>,
+    /// 逐字罗马音歌词（YRC）
+    pub(crate) yromalrc: Option<LyricContent>,
+}

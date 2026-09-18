@@ -15,7 +15,6 @@ lyrics-crypto = { path = "../lyrics-crypto", version = "0.1.3" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
-once_cell = { workspace = true }
 rand = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }

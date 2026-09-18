@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
@@ -140,7 +142,10 @@ async fn init_session() -> Option<(String, String, String)> {
     let session_resp: SessionResponse = serde_json::from_str(&resp).ok()?;
 
     if session_resp.code? != 0 {
-        eprintln!("  [QQMusic] Session init failed: code {}", session_resp.code.unwrap_or(-1));
+        eprintln!(
+            "  [QQMusic] Session init failed: code {}",
+            session_resp.code.unwrap_or(-1)
+        );
         return None;
     }
 
@@ -181,11 +186,7 @@ async fn get_comm() -> Comm {
 }
 
 fn generate_search_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let millis = base_api::unix_millis() as u64;
     let part1 = (rand::random::<u64>() % 20 + 1) * 18014398509481984;
     let part2 = (rand::random::<u64>() % 4194305) * 4294967296;
     let part3 = millis % 86400000;
@@ -219,7 +220,10 @@ pub(crate) async fn search(keyword: &str) -> Option<MusicuResponse> {
         Some(text) => {
             let result: Option<MusicuResponse> = serde_json::from_str(&text).ok();
             if result.is_none() {
-                eprintln!("  [QQMusic] Failed to parse response: {}", &text[..text.len().min(500)]);
+                eprintln!(
+                    "  [QQMusic] Failed to parse response: {}",
+                    truncate_for_log(&text)
+                );
             }
             result
         }
@@ -316,15 +320,77 @@ pub async fn get_lyrics(
     let resp = base_api::post_json_raw_with_headers(url, &body, QQ_HEADERS).await?;
     let result: Option<LyricsResponse> = serde_json::from_str(&resp).ok();
     if result.is_none() {
-        eprintln!("  [QQMusic] Failed to parse lyrics response: {}", &resp[..resp.len().min(500)]);
+        eprintln!(
+            "  [QQMusic] Failed to parse lyrics response: {}",
+            truncate_for_log(&resp)
+        );
     }
 
     let data = result?.request?.data?;
 
-    let lyric = decrypt_qrc_lyric(&data.lyric, data.qrc_t.unwrap_or(0), data.lrc_t.unwrap_or(0));
-    let trans = decrypt_qrc_lyric(&data.trans, data.trans_t.unwrap_or(0), 0);
+    let lyric = decrypt_qrc_lyric(
+        &data.lyric,
+        data.qrc_t.unwrap_or(0),
+        data.lrc_t.unwrap_or(0),
+    )
+    .and_then(|text| extract_lyric_content(&text));
+    let trans = decrypt_qrc_lyric(&data.trans, data.trans_t.unwrap_or(0), 0)
+        .and_then(|text| extract_lyric_content(&text));
 
     Some((lyric, trans))
+}
+
+/// 截取用于日志输出的前缀（按字符边界截断，避免切坏多字节字符）。
+fn truncate_for_log(text: &str) -> &str {
+    if text.len() <= 500 {
+        return text;
+    }
+    let mut end = 500;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// QRC XML 节点与结果名的映射，对应上游 `VerbatimXmlMappingDict`。
+const QQ_XML_MAPPING: [(&str, &str); 4] = [
+    ("content", "orig"),
+    ("contentts", "ts"),
+    ("contentroma", "roma"),
+    ("Lyric_1", "lyric"),
+];
+
+/// 从 QRC XML 封装中取出歌词正文，非 XML 内容原样返回。
+///
+/// 腾讯音乐返回的正文是 `<QrcInfos><LyricInfo><Lyric_1 LyricContent="[ti:…]…"/>` 形式的封装，
+/// 需要按上游 `QQMusic.Api.GetLyricsAsync` 的方式取出 `LyricContent` 属性；
+/// 翻译等内容本身是纯文本，则直接返回。
+fn extract_lyric_content(raw: &str) -> Option<String> {
+    // 翻译等纯文本内容占多数，先判再拷贝，避免整段歌词无谓复制一次。
+    if !raw.contains("<?xml") {
+        return Some(raw.to_string());
+    }
+
+    let mut text = raw.to_string();
+
+    // 封装可能嵌套多层，逐层解包（上游同样会在解密后再次解析 `<?xml`）。
+    for _ in 0..2 {
+        if !text.contains("<?xml") {
+            return Some(text);
+        }
+
+        let document = lyrics_crypto::decrypter::qrc::xml_utils::create(&text)?;
+        let mut found = HashMap::new();
+        lyrics_crypto::decrypter::qrc::xml_utils::recursion_find_element(
+            &document,
+            &QQ_XML_MAPPING,
+            &mut found,
+        );
+
+        text = found.get("lyric")?.attribute("LyricContent")?.to_string();
+    }
+
+    Some(text)
 }
 
 fn decrypt_qrc_lyric(encrypted: &Option<String>, qrc_t: i32, lrc_t: i32) -> Option<String> {

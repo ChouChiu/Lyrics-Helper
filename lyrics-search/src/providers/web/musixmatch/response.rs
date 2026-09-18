@@ -1,92 +1,63 @@
 use serde::Deserialize;
 
+/// Musixmatch 曲目信息（对应 C# `GetTrackResponse.Track`）。
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct TrackResponse {
-    pub(crate) message: Option<Message>,
+pub struct Track {
+    /// 曲目 ID
+    pub track_id: i64,
+    /// 曲目名称
+    #[serde(default)]
+    pub track_name: String,
+    /// 艺人名称
+    #[serde(default)]
+    pub artist_name: String,
+    /// 专辑名称
+    #[serde(default)]
+    pub album_name: Option<String>,
+    /// 时长（秒）
+    #[serde(default)]
+    pub track_length: i32,
+    /// 曲目 vanity ID
+    #[serde(default)]
+    pub commontrack_vanity_id: Option<String>,
+}
+
+/// 获取曲目响应（对应 C# `GetTrackResponse`）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct TrackResponse {
+    pub message: Option<Message>,
+}
+
+impl TrackResponse {
+    /// 用单条搜索结果构造响应（对应 C# `GetTrack` 中手动构造的 `GetTrackResponse`）。
+    pub(crate) fn from_track(track: Track) -> Self {
+        Self {
+            message: Some(Message {
+                header: Header {
+                    status_code: 200,
+                    confidence: 1000.0,
+                },
+                body: Some(Body { track: Some(track) }),
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct Message {
-    pub(crate) header: Header,
-    pub(crate) body: Option<Body>,
+pub struct Message {
+    pub header: Header,
+    pub body: Option<Body>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct Header {
+pub struct Header {
     #[serde(rename = "status_code")]
-    pub(crate) _status_code: i32,
+    pub status_code: i32,
     #[serde(default)]
-    pub(crate) confidence: f64,
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct Body {
-    pub(crate) track: Option<Track>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct Track {
-    pub(crate) track_id: i64,
-    pub(crate) track_name: String,
-    pub(crate) artist_name: String,
-    pub(crate) album_name: Option<String>,
-    #[serde(default)]
-    pub(crate) track_length: i32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct TokenResponse {
-    pub(crate) message: Option<TokenMessage>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct TokenMessage {
-    pub(crate) body: Option<TokenBody>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct TokenBody {
-    pub(crate) user_token: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct LyricsResponse {
-    pub(crate) message: Option<LyricsMessage>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct LyricsMessage {
-    pub(crate) body: Option<LyricsBody>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct LyricsBody {
-    pub(crate) lyrics: Option<LyricsContent>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct LyricsContent {
-    pub(crate) lyrics_body: Option<String>,
-    #[allow(dead_code)]
-    pub(crate) script_tracking_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct SubtitleResponse {
-    pub(crate) message: Option<SubtitleMessage>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct SubtitleMessage {
-    pub(crate) body: Option<SubtitleBody>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct SubtitleBody {
-    pub(crate) subtitle: Option<SubtitleContent>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct SubtitleContent {
-    pub(crate) subtitle_body: Option<String>,
+pub struct Body {
+    pub track: Option<Track>,
 }
