@@ -4,7 +4,7 @@ use serde::Deserialize;
 pub(crate) struct SearchResponse {
     pub(crate) result: Option<SearchResultData>,
     #[serde(rename = "code")]
-    pub(crate) _code: Option<i32>,
+    pub(crate) code: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -23,16 +23,67 @@ pub(crate) struct Song {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Artist {
-    #[serde(rename = "id")]
+    // 上游用 Newtonsoft 解析，缺字段不会失败；这里同样容忍缺失。
+    #[serde(rename = "id", default)]
     pub(crate) _id: i64,
     pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Album {
-    #[serde(rename = "id")]
+    #[serde(rename = "id", default)]
     pub(crate) _id: i64,
     pub(crate) name: String,
+}
+
+/// 网易云 eapi 单曲搜索响应，对应 C# `EapiSearchResult`。
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct EapiSearchResponse {
+    pub(crate) result: Option<EapiSearchResultData>,
+    pub(crate) code: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct EapiSearchResultData {
+    pub(crate) songs: Option<Vec<EapiSong>>,
+}
+
+/// eapi 搜索返回的单曲，字段名与 web 接口不同，对应 C# `EapiSong`。
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct EapiSong {
+    pub(crate) id: i64,
+    pub(crate) name: String,
+    #[serde(rename = "ar")]
+    pub(crate) artists: Vec<Artist>,
+    #[serde(rename = "al")]
+    pub(crate) album: Album,
+    #[serde(rename = "dt")]
+    pub(crate) duration: i64,
+}
+
+impl From<EapiSong> for Song {
+    fn from(song: EapiSong) -> Self {
+        Self {
+            id: song.id,
+            name: song.name,
+            artists: song.artists,
+            album: song.album,
+            duration: song.duration,
+        }
+    }
+}
+
+impl From<EapiSearchResponse> for SearchResponse {
+    fn from(response: EapiSearchResponse) -> Self {
+        Self {
+            result: response.result.map(|result| SearchResultData {
+                songs: result
+                    .songs
+                    .map(|songs| songs.into_iter().map(Song::from).collect()),
+            }),
+            code: response.code,
+        }
+    }
 }
 
 /// 网易云音乐歌词响应。

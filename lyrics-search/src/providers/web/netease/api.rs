@@ -1,11 +1,22 @@
 use reqwest::Method;
 
 use super::eapi;
-use super::response::{LyricContent, LyricsResponse, SearchResponse, SyllableLyricsResponse};
+use super::response::{
+    EapiSearchResponse, LyricContent, LyricsResponse, SearchResponse, SyllableLyricsResponse,
+};
 use crate::error::SearchError;
 use crate::providers::web::base_api;
 
 const REFERER: &str = "https://music.163.com/";
+
+/// 单曲搜索接口地址（web），对应 C# `Api.Search`。
+const SEARCH_URL: &str = "http://music.163.com/api/search/get/web";
+
+/// 单曲搜索接口地址（eapi），对应 C# `Api.SearchNew`。
+const SEARCH_NEW_URL: &str = "https://interface.music.163.com/eapi/cloudsearch/pc";
+
+/// 搜索单曲时使用的类型参数，对应 C# `Api.SearchTypeEnum.SONG_ID`。
+const SEARCH_TYPE_SONG: &str = "1";
 
 /// 逐字歌词接口地址，对应 C# `Api.GetLyricNew`。
 const SYLLABLE_LYRICS_URL: &str = "https://interface3.music.163.com/eapi/song/lyric/v1";
@@ -18,13 +29,38 @@ fn standard_headers() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+/// 使用 web 接口搜索单曲，对应 C# `Api.Search`。
+///
+/// 海外 IP 下该接口返回加密结果（`{"result":"<hex>","abroad":true}`），无法按正常结构解析，
+/// 此时会得到 [`SearchError::Json`]；风控环境则返回 `-460`（见 [`crate::searchers::netease`]）。
 pub(crate) async fn search(keyword: &str) -> Result<SearchResponse, SearchError> {
     let url = format!(
-        "https://music.163.com/api/search/get?s={}&type=1&limit=10&offset=0",
+        "{SEARCH_URL}?csrf_token=hlpretag=&hlposttag=&s={}&type={SEARCH_TYPE_SONG}&offset=0&total=true&limit=20",
         urlencoding::encode(keyword)
     );
     let response = base_api::send(Method::GET, &url, &standard_headers()).await?;
     base_api::json(response).await
+}
+
+/// 使用 eapi 接口搜索单曲，对应 C# `Api.SearchNew`，供 web 接口不可用时兜底。
+///
+/// 返回体为 eapi 的搜索结果结构（字段名与 web 接口不同），此处转换为
+/// [`SearchResponse`] 后交给调用方，调用方无需区分两个接口。
+pub(crate) async fn search_new(keyword: &str) -> Result<SearchResponse, SearchError> {
+    let response = eapi::post(
+        SEARCH_NEW_URL,
+        serde_json::json!({
+            "s": keyword,
+            "type": SEARCH_TYPE_SONG,
+            "limit": "30",
+            "offset": "0",
+            "total": "true",
+        }),
+    )
+    .await?;
+
+    let response: EapiSearchResponse = serde_json::from_str(&response)?;
+    Ok(response.into())
 }
 
 /// 获取网易云音乐歌词，返回 `(原文歌词, 翻译歌词)` 元组。
