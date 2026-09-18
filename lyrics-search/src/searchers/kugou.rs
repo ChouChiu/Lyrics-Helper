@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 
-use crate::providers::web::kugou::api;
+use super::Searchers;
 use super::search_result::SearchResult;
 use super::searcher::Searcher;
-use super::Searchers;
+use crate::error::SearchError;
+use crate::providers::web::kugou::api;
 
 /// 酷狗音乐歌词搜索器。
 pub struct KugouSearcher;
@@ -31,9 +32,16 @@ impl Searcher for KugouSearcher {
         Searchers::Kugou
     }
 
-    async fn search_for_results_str(&self, search_string: &str) -> Option<Vec<SearchResult>> {
+    async fn search_for_results_str(
+        &self,
+        search_string: &str,
+    ) -> Result<Vec<SearchResult>, SearchError> {
         let response = api::search(search_string).await?;
-        let songs = response.data?.info?;
+
+        // 缺少 data / info 都只是「没有匹配」，不是错误。
+        let Some(songs) = response.data.and_then(|data| data.info) else {
+            return Ok(Vec::new());
+        };
 
         let search_results: Vec<SearchResult> = songs
             .into_iter()
@@ -54,10 +62,6 @@ impl Searcher for KugouSearcher {
             })
             .collect();
 
-        if search_results.is_empty() {
-            return None;
-        }
-
-        Some(search_results)
+        Ok(search_results)
     }
 }

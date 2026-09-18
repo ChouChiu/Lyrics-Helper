@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 
-use crate::providers::web::apple_music::api;
+use super::Searchers;
 use super::search_result::SearchResult;
 use super::searcher::Searcher;
-use super::Searchers;
+use crate::error::SearchError;
+use crate::providers::web::apple_music::api;
 
 /// Apple Music 歌词搜索器。
 pub struct AppleMusicSearcher {
@@ -37,7 +38,10 @@ impl Searcher for AppleMusicSearcher {
         Searchers::AppleMusic
     }
 
-    async fn search_for_results_str(&self, search_string: &str) -> Option<Vec<SearchResult>> {
+    async fn search_for_results_str(
+        &self,
+        search_string: &str,
+    ) -> Result<Vec<SearchResult>, SearchError> {
         let response = api::search(
             search_string,
             &self.access_token,
@@ -46,7 +50,14 @@ impl Searcher for AppleMusicSearcher {
         )
         .await?;
 
-        let songs = response.results?.songs?.data?;
+        // 缺少 results / songs / data 都只是「没有匹配」，不是错误。
+        let Some(songs) = response
+            .results
+            .and_then(|results| results.songs)
+            .and_then(|songs| songs.data)
+        else {
+            return Ok(Vec::new());
+        };
 
         let search_results: Vec<SearchResult> = songs
             .into_iter()
@@ -66,10 +77,6 @@ impl Searcher for AppleMusicSearcher {
             })
             .collect();
 
-        if search_results.is_empty() {
-            return None;
-        }
-
-        Some(search_results)
+        Ok(search_results)
     }
 }

@@ -1,5 +1,6 @@
 use super::api_options::ApiOptions;
 use super::response::{Track, TrackResponse};
+use crate::error::SearchError;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
@@ -24,15 +25,6 @@ static TOKEN_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 /// 串行化所有请求，并记录上一次请求的完成时间用于最小间隔控制。
 static REQUEST_LOCK: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
 
-/// Musixmatch 请求错误，对应 C# 的 `RequestCaptchaException` 与 `HttpRequestException`。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MusixmatchError {
-    /// 命中 401 且 hint 为 captcha（对应 C# `RequestCaptchaException`）。
-    Captcha,
-    /// 其他请求错误（对应 C# `HttpRequestException`）。
-    Request(String),
-}
-
 /// 返回当前配置的副本。
 pub async fn options() -> ApiOptions {
     OPTIONS.read().await.clone()
@@ -40,12 +32,15 @@ pub async fn options() -> ApiOptions {
 
 /// 覆盖全局配置（对应 C# `new Api(options => ...)` 中的配置动作）。
 ///
-/// 配置会先经过校验（对应 C# `ValidateOptions`），非法配置会 panic。
-pub async fn set_options(mut options: ApiOptions) {
-    validate_options(&mut options);
+/// 配置会先经过校验（对应 C# `ValidateOptions`），非法配置返回
+/// [`SearchError::InvalidConfig`]，此时不会改动已有的全局配置。
+pub async fn set_options(mut options: ApiOptions) -> Result<(), SearchError> {
+    validate_options(&mut options)?;
     let client = create_client(&options);
     *OPTIONS.write().await = options;
     *CLIENT.write().await = client;
+
+    Ok(())
 }
 
 /// 设置 UserToken（例如之前缓存的 Token），不可用的 Token 会被忽略。
@@ -63,22 +58,27 @@ pub async fn get_user_token() -> Option<String> {
 }
 
 /// 获取 Musixmatch 用户令牌（用于后续 API 调用）。
-pub async fn get_token() -> Option<String> {
-    let response = request_token().await.ok().flatten()?;
-    response["message"]["body"]["user_token"]
-        .as_str()
-        .map(str::to_string)
+///
+/// `Ok(None)` 表示服务端没有给出可用的 UserToken。
+pub async fn get_token() -> Result<Option<String>, SearchError> {
+    let response = request_token().await?;
+
+    Ok(response
+        .as_ref()
+        .and_then(|json| json["message"]["body"]["user_token"].as_str())
+        .map(str::to_string))
 }
 
 /// 搜索曲目列表（对应 C# `SearchTracksAsync`）。
 ///
-/// 请求失败时返回 `None`；请求成功但没有通过相关性校验时返回空列表。
+/// 网络、HTTP 状态码或响应解析失败时返回 [`SearchError`]；
+/// 「请求成功但没有通过相关性校验的结果」由空 `Vec` 表示，不是错误。
 pub async fn search_tracks(
     keyword: Option<&str>,
     track: Option<&str>,
     artist: Option<&str>,
     duration_secs: Option<i32>,
-) -> Option<Vec<Track>> {
+) -> Result<Vec<Track>, SearchError> {
     let mut parameters = vec![
         "page_size=10".to_string(),
         "page=1".to_string(),
@@ -93,14 +93,14 @@ pub async fn search_tracks(
 
     let request = format!("track.search?{}", parameters.join("&"));
     for attempt in 0..RESULT_RETRY_COUNT {
-        let response = send_api_request(&request).await.ok()?;
+        let response = send_api_request(&request).await?;
         if let Some(list) = body_of(&response)["track_list"].as_array() {
             let results: Vec<Track> = list
                 .iter()
                 .filter_map(|item| Track::deserialize(&item["track"]).ok())
                 .collect();
             if !results.is_empty() && has_related_result(&results, keyword, track, artist) {
-                return Some(results);
+                return Ok(results);
             }
         }
 
@@ -109,45 +109,64 @@ pub async fn search_tracks(
         }
     }
 
-    Some(Vec::new())
+    Ok(Vec::new())
 }
 
 /// 获取曲目（对应 C# `GetTrack`），返回搜索结果的第一条。
+///
+/// `Ok(None)` 表示搜索成功但没有结果。
 pub async fn search_track(
     q_track: &str,
     q_artist: &str,
     user_token: &str,
-) -> Option<TrackResponse> {
+) -> Result<Option<TrackResponse>, SearchError> {
     set_user_token(user_token).await;
     let track = search_tracks(None, Some(q_track), Some(q_artist), None)
         .await?
         .into_iter()
-        .next()?;
-    Some(TrackResponse::from_track(track))
+        .next();
+
+    Ok(track.map(TrackResponse::from_track))
 }
 
 /// 获取完整歌词的原始响应（对应 C# `GetFullLyricsRaw(string trackId)`）。
 ///
 /// `expected_vanity_id` 非空时会额外校验曲目的 vanity ID。
+/// `Ok(None)` 表示重试后仍未匹配到曲目；`track_id` 无法解析为整数时返回
+/// [`SearchError::Payload`]。
 pub async fn get_full_lyrics_raw(
     track_id: &str,
     expected_vanity_id: Option<&str>,
-) -> Option<String> {
-    let response = get_full_lyrics_value(track_id, expected_vanity_id).await?;
-    serde_json::to_string(&response).ok()
+) -> Result<Option<String>, SearchError> {
+    let Some(response) = get_full_lyrics_value(track_id, expected_vanity_id).await? else {
+        return Ok(None);
+    };
+
+    let raw = serde_json::to_string(&response)
+        .map_err(|error| SearchError::Payload(format!("Musixmatch 歌词响应序列化失败：{error}")))?;
+
+    Ok(Some(raw))
 }
 
 /// 获取完整歌词的宏调用响应，供内部提取字段使用（避免序列化后再解析一次）。
-async fn get_full_lyrics_value(track_id: &str, expected_vanity_id: Option<&str>) -> Option<Value> {
-    let id: i64 = track_id.parse().ok()?;
+///
+/// `Ok(None)` 表示重试后仍未匹配到曲目；`track_id` 无法解析为整数时返回
+/// [`SearchError::Payload`]。
+async fn get_full_lyrics_value(
+    track_id: &str,
+    expected_vanity_id: Option<&str>,
+) -> Result<Option<Value>, SearchError> {
+    let id: i64 = track_id
+        .parse()
+        .map_err(|_| SearchError::Payload(format!("Musixmatch 曲目 ID 不是整数：{track_id}")))?;
 
     for attempt in 0..RESULT_RETRY_COUNT {
-        let response = get_lyrics_response(id).await.ok()?;
+        let response = get_lyrics_response(id).await?;
         if let Some(track) = get_matched_track(&response) {
             if track.track_id == id
                 && vanity_matches(expected_vanity_id, track.commontrack_vanity_id.as_deref())
             {
-                return Some(response);
+                return Ok(Some(response));
             }
         }
 
@@ -156,25 +175,37 @@ async fn get_full_lyrics_value(track_id: &str, expected_vanity_id: Option<&str>)
         }
     }
 
-    None
+    Ok(None)
 }
 
 /// 获取 Musixmatch 非同步歌词文本。
-pub async fn get_lyrics(track_id: i64, user_token: &str) -> Option<String> {
+///
+/// `Ok(None)` 表示未匹配到曲目，或响应里没有 `lyrics_body` 字段。
+pub async fn get_lyrics(track_id: i64, user_token: &str) -> Result<Option<String>, SearchError> {
     set_user_token(user_token).await;
     let response = get_full_lyrics_value(&track_id.to_string(), None).await?;
-    unsynced_lyrics_from(&response)
+
+    Ok(response.as_ref().and_then(unsynced_lyrics_from))
 }
 
 /// 获取 Musixmatch 同步歌词（LRC 格式）。
-pub async fn get_synced_lyrics(track_id: i64, user_token: &str) -> Option<String> {
+///
+/// `Ok(None)` 表示未匹配到曲目，或响应里没有字幕。
+pub async fn get_synced_lyrics(
+    track_id: i64,
+    user_token: &str,
+) -> Result<Option<String>, SearchError> {
     set_user_token(user_token).await;
     let response = get_full_lyrics_value(&track_id.to_string(), None).await?;
-    synced_lyrics_from(&response)
+
+    Ok(response.as_ref().and_then(synced_lyrics_from))
 }
 
-/// 请求 UserToken（对应 C# `RequestTokenAsync`）；响应体为空时返回 `None`。
-async fn request_token() -> Result<Option<Value>, MusixmatchError> {
+/// 请求 UserToken（对应 C# `RequestTokenAsync`）。
+///
+/// `Ok(None)` 表示响应体为空；业务状态码非 200 时返回
+/// [`SearchError::Api`]，401 + captcha 时返回 [`SearchError::Captcha`]。
+async fn request_token() -> Result<Option<Value>, SearchError> {
     let options = OPTIONS.read().await.clone();
     let url = format!(
         "{}token.get?user_language=en&app_id={}&t={}",
@@ -185,7 +216,7 @@ async fn request_token() -> Result<Option<Value>, MusixmatchError> {
 
     let response = get_response(&url).await?;
     if !response.is_success() {
-        return Err(http_error(response.status));
+        return Err(SearchError::Status(response.status));
     }
     if response.content.trim().is_empty() {
         return Ok(None);
@@ -196,26 +227,26 @@ async fn request_token() -> Result<Option<Value>, MusixmatchError> {
     let status_code = header["status_code"].as_i64();
     let hint = header["hint"].as_str();
     if status_code == Some(401) && is_hint(hint, "captcha") {
-        return Err(MusixmatchError::Captcha);
+        return Err(SearchError::Captcha);
     }
     if status_code != Some(200) {
-        return Err(MusixmatchError::Request(api_status_message(
-            status_code,
-            hint,
-        )));
+        return Err(SearchError::Api(api_status_message(status_code, hint)));
     }
 
     Ok(Some(json))
 }
 
 /// 发送 API 请求并解析 JSON（对应 C# `SendApiRequestAsync`）。
-async fn send_api_request(request: &str) -> Result<Value, MusixmatchError> {
+///
+/// 命中 captcha 时立即返回，其余错误按 [`REQUEST_RETRY_COUNT`] 重试；
+/// 重试耗尽后返回最后一次的错误本身，错误类型保持不变。
+async fn send_api_request(request: &str) -> Result<Value, SearchError> {
     let mut last_error = None;
 
     for attempt in 0..REQUEST_RETRY_COUNT {
         match send_api_request_once(request).await {
             Ok(json) => return Ok(json),
-            Err(error @ MusixmatchError::Captcha) => return Err(error),
+            Err(error @ SearchError::Captcha) => return Err(error),
             Err(error) => last_error = Some(error),
         }
 
@@ -224,16 +255,13 @@ async fn send_api_request(request: &str) -> Result<Value, MusixmatchError> {
         }
     }
 
-    Err(MusixmatchError::Request(format!(
-        "Musixmatch request failed after all retries. ({})",
-        last_error
-            .map(|error| error_message(&error).to_string())
-            .unwrap_or_else(|| "unknown error".to_string())
-    )))
+    Err(last_error.unwrap_or_else(|| {
+        SearchError::Api("Musixmatch request failed after all retries.".to_string())
+    }))
 }
 
 /// 发送单次 API 请求（对应 C# `SendApiRequestAsync` 循环体）。
-async fn send_api_request_once(request: &str) -> Result<Value, MusixmatchError> {
+async fn send_api_request_once(request: &str) -> Result<Value, SearchError> {
     let token = ensure_user_token().await?;
     let options = OPTIONS.read().await.clone();
     let separator = if request.contains('?') { '&' } else { '?' };
@@ -249,7 +277,7 @@ async fn send_api_request_once(request: &str) -> Result<Value, MusixmatchError> 
 
     let response = get_response(&url).await?;
     if response.content.trim().is_empty() {
-        return Err(http_error(response.status));
+        return Err(SearchError::Status(response.status));
     }
 
     let json = parse_json(&response.content)?;
@@ -261,7 +289,7 @@ async fn send_api_request_once(request: &str) -> Result<Value, MusixmatchError> 
         return Ok(json);
     }
     if !response.is_success() {
-        return Err(http_error(response.status));
+        return Err(SearchError::Status(response.status));
     }
     if status_code == Some(200) {
         return Ok(json);
@@ -270,17 +298,14 @@ async fn send_api_request_once(request: &str) -> Result<Value, MusixmatchError> 
     if status_code == Some(401) && is_hint(hint, "renew") {
         invalidate_token().await;
     } else if status_code == Some(401) && is_hint(hint, "captcha") {
-        return Err(MusixmatchError::Captcha);
+        return Err(SearchError::Captcha);
     }
 
-    Err(MusixmatchError::Request(api_status_message(
-        status_code,
-        hint,
-    )))
+    Err(SearchError::Api(api_status_message(status_code, hint)))
 }
 
 /// 确保存在可用的 UserToken（对应 C# `EnsureUserTokenAsync`）。
-async fn ensure_user_token() -> Result<String, MusixmatchError> {
+async fn ensure_user_token() -> Result<String, SearchError> {
     if let Some(token) = usable_token().await {
         return Ok(token);
     }
@@ -302,7 +327,7 @@ async fn ensure_user_token() -> Result<String, MusixmatchError> {
             *USER_TOKEN.write().await = Some(token.clone());
             Ok(token)
         }
-        None => Err(MusixmatchError::Request(
+        None => Err(SearchError::Api(
             "Musixmatch token request failed.".to_string(),
         )),
     }
@@ -320,7 +345,7 @@ async fn invalidate_token() {
 }
 
 /// 发送请求并读取响应内容（对应 C# `GetResponseAsync`），同一时刻只允许一个请求。
-async fn get_response(url: &str) -> Result<RawResponse, MusixmatchError> {
+async fn get_response(url: &str) -> Result<RawResponse, SearchError> {
     let mut last_request = REQUEST_LOCK.lock().await;
 
     if let Some(previous) = *last_request {
@@ -348,15 +373,9 @@ async fn get_response(url: &str) -> Result<RawResponse, MusixmatchError> {
         request = request.header("Cookie", cookie);
     }
 
-    let response = request
-        .send()
-        .await
-        .map_err(|error| MusixmatchError::Request(error.to_string()))?;
+    let response = request.send().await?;
     let status = response.status();
-    let content = response
-        .text()
-        .await
-        .map_err(|error| MusixmatchError::Request(error.to_string()))?;
+    let content = response.text().await?;
     *last_request = Some(Instant::now());
 
     Ok(RawResponse {
@@ -366,7 +385,7 @@ async fn get_response(url: &str) -> Result<RawResponse, MusixmatchError> {
 }
 
 /// 请求歌词宏调用响应（对应 C# `GetLyricsResponseAsync`）。
-async fn get_lyrics_response(track_id: i64) -> Result<Value, MusixmatchError> {
+async fn get_lyrics_response(track_id: i64) -> Result<Value, SearchError> {
     send_api_request(&format!(
         "macro.subtitles.get?namespace=lyrics_richsynched\
          &optional_calls=track.richsync\
@@ -405,8 +424,9 @@ fn body_of(response: &Value) -> &Value {
     &response["message"]["body"]
 }
 
-fn parse_json(content: &str) -> Result<Value, MusixmatchError> {
-    serde_json::from_str(content).map_err(|error| MusixmatchError::Request(error.to_string()))
+/// 响应文本不是合法 JSON 时返回 [`SearchError::Json`]。
+fn parse_json(content: &str) -> Result<Value, SearchError> {
+    serde_json::from_str(content).map_err(SearchError::Json)
 }
 
 /// 对应 C# `AddParameter`：非空白值才会加入查询参数。
@@ -506,20 +526,14 @@ fn is_hint(hint: Option<&str>, expected: &str) -> bool {
     hint.is_some_and(|hint| hint.eq_ignore_ascii_case(expected))
 }
 
+/// 拼装业务状态码错误的消息（保留原始 `status_code` 与 `hint`）。
 fn api_status_message(status_code: Option<i64>, hint: Option<&str>) -> String {
     let status = status_code
         .map(|status| status.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| "未知".to_string());
     match hint.filter(|hint| !hint.trim().is_empty()) {
-        Some(hint) => format!("Musixmatch returned API status {status} ({hint})."),
-        None => format!("Musixmatch returned API status {status}."),
-    }
-}
-
-fn error_message(error: &MusixmatchError) -> &str {
-    match error {
-        MusixmatchError::Captcha => "Hit 401 error with Captcha hint.",
-        MusixmatchError::Request(message) => message,
+        Some(hint) => format!("Musixmatch 返回业务状态码 {status}（hint: {hint}）"),
+        None => format!("Musixmatch 返回业务状态码 {status}"),
     }
 }
 
@@ -544,19 +558,30 @@ fn create_client(options: &ApiOptions) -> Client {
 }
 
 /// 对应 C# `ValidateOptions`。
-fn validate_options(options: &mut ApiOptions) {
+///
+/// 非法配置返回 [`SearchError::InvalidConfig`]（原先是 panic）；
+/// base URL 结尾补 `/` 仍就地进行（与 C# 一样是副作用）。
+fn validate_options(options: &mut ApiOptions) -> Result<(), SearchError> {
     if options.api_base_url.trim().is_empty() {
-        panic!("Musixmatch API base URL is required.");
+        return Err(SearchError::InvalidConfig(
+            "Musixmatch API base URL is required.".to_string(),
+        ));
     }
     if !options.api_base_url.ends_with('/') {
         options.api_base_url.push('/');
     }
     if options.app_id.trim().is_empty() {
-        panic!("Musixmatch app ID is required.");
+        return Err(SearchError::InvalidConfig(
+            "Musixmatch app ID is required.".to_string(),
+        ));
     }
     if options.timeout.is_zero() {
-        panic!("Musixmatch request timeout must be greater than zero.");
+        return Err(SearchError::InvalidConfig(
+            "Musixmatch request timeout must be greater than zero.".to_string(),
+        ));
     }
+
+    Ok(())
 }
 
 /// 请求结果（对应 C# `GetResponseAsync` 返回的元组）。
@@ -570,9 +595,4 @@ impl RawResponse {
     fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
     }
-}
-
-/// 构造「返回了非成功状态码」的错误。
-fn http_error(status: u16) -> MusixmatchError {
-    MusixmatchError::Request(format!("Musixmatch returned HTTP {}.", status))
 }

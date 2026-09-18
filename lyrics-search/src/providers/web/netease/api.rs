@@ -1,5 +1,8 @@
+use reqwest::Method;
+
 use super::eapi;
 use super::response::{LyricContent, LyricsResponse, SearchResponse, SyllableLyricsResponse};
+use crate::error::SearchError;
 use crate::providers::web::base_api;
 
 const REFERER: &str = "https://music.163.com/";
@@ -15,24 +18,27 @@ fn standard_headers() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-pub(crate) async fn search(keyword: &str) -> Option<SearchResponse> {
+pub(crate) async fn search(keyword: &str) -> Result<SearchResponse, SearchError> {
     let url = format!(
         "https://music.163.com/api/search/get?s={}&type=1&limit=10&offset=0",
         urlencoding::encode(keyword)
     );
-    base_api::get_json_with_headers(&url, &standard_headers()).await
+    let response = base_api::send(Method::GET, &url, &standard_headers()).await?;
+    base_api::json(response).await
 }
 
 /// 获取网易云音乐歌词，返回 `(原文歌词, 翻译歌词)` 元组。
 ///
 /// 该接口只返回逐行歌词；逐字歌词请使用 [`get_syllable_lyrics`]。
-pub async fn get_lyrics(song_id: i64) -> Option<(Option<String>, Option<String>)> {
+/// 请求成功但缺少某类歌词时对应元素为 `Ok(None)`；网络、状态码或响应格式失败返回 [`SearchError`]。
+pub async fn get_lyrics(song_id: i64) -> Result<(Option<String>, Option<String>), SearchError> {
     let url = format!(
         "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1",
         song_id
     );
-    let resp: LyricsResponse = base_api::get_json_with_headers(&url, &standard_headers()).await?;
-    Some((
+    let response = base_api::send(Method::GET, &url, &standard_headers()).await?;
+    let resp: LyricsResponse = base_api::json(response).await?;
+    Ok((
         resp.lrc.and_then(|l| l.lyric),
         resp.tlyric.and_then(|t| t.lyric),
     ))
@@ -53,8 +59,9 @@ pub struct SyllableLyrics {
 ///
 /// 逐字歌词为带 JSON 信息行的 YRC 格式，可直接交给
 /// [`LyricsRawTypes::Yrc`](lyrics_core::models::LyricsRawTypes::Yrc) 解析。
-/// 曲目没有逐字歌词时返回 `None`，此时可回退到 [`get_lyrics`] 获取逐行歌词。
-pub async fn get_syllable_lyrics(song_id: i64) -> Option<SyllableLyrics> {
+/// 请求成功但该曲目没有逐字歌词时返回 `Ok(None)`，此时可回退到 [`get_lyrics`] 获取逐行歌词；
+/// eapi 请求失败或响应无法按逐字歌词结构解析时返回 [`SearchError`]。
+pub async fn get_syllable_lyrics(song_id: i64) -> Result<Option<SyllableLyrics>, SearchError> {
     let response = eapi::post(
         SYLLABLE_LYRICS_URL,
         serde_json::json!({
@@ -72,14 +79,15 @@ pub async fn get_syllable_lyrics(song_id: i64) -> Option<SyllableLyrics> {
     )
     .await?;
 
-    let response: SyllableLyricsResponse = serde_json::from_str(&response).ok()?;
+    let response: SyllableLyricsResponse = serde_json::from_str(&response)?;
     let lyrics = SyllableLyrics {
         yrc: lyric_text(response.yrc),
         ytlrc: lyric_text(response.ytlrc),
         yromalrc: lyric_text(response.yromalrc),
     };
 
-    (lyrics.yrc.is_some() || lyrics.ytlrc.is_some() || lyrics.yromalrc.is_some()).then_some(lyrics)
+    let has_syllable = lyrics.yrc.is_some() || lyrics.ytlrc.is_some() || lyrics.yromalrc.is_some();
+    Ok(has_syllable.then_some(lyrics))
 }
 
 /// 取出歌词文本，接口会以空字符串表示没有该类歌词。

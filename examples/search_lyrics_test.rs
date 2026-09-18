@@ -1,5 +1,8 @@
 use lyrics_helper::models::{LyricsRawTypes, TrackMetadata};
-use lyrics_helper::search::providers::web::{kugou, lrclib, musixmatch, netease, qq_music};
+use lyrics_helper::search::providers::web::{
+    kugou, lrclib, musixmatch, netease, qq_music, soda_music,
+};
+use lyrics_helper::searchers::Searchers;
 use lyrics_helper::searchers::apple_music::AppleMusicSearcher;
 use lyrics_helper::searchers::kugou::KugouSearcher;
 use lyrics_helper::searchers::lrclib::LRCLIBSearcher;
@@ -9,7 +12,6 @@ use lyrics_helper::searchers::qq_music::QQMusicSearcher;
 use lyrics_helper::searchers::search_for_best_result;
 use lyrics_helper::searchers::soda_music::SodaMusicSearcher;
 use lyrics_helper::searchers::spotify::SpotifySearcher;
-use lyrics_helper::searchers::Searchers;
 
 #[tokio::main]
 async fn main() {
@@ -54,7 +56,7 @@ async fn main() {
     for (name, searcher) in &platforms {
         print!("  搜索 {} ... ", name);
         match search_for_best_result(*searcher, &track).await {
-            Some(r) => {
+            Ok(Some(r)) => {
                 let artists = r.artist();
                 println!("✅ {} - {} (匹配: {:?})", r.title, artists, r.match_type);
                 all_results.push(SearchResultWithPlatform {
@@ -69,11 +71,15 @@ async fn main() {
                     duration_ms: r.duration_ms,
                 });
             }
-            None => println!("❌ 未找到"),
+            Ok(None) => println!("❌ 未找到"),
+            Err(error) => println!("❌ 搜索失败: {error}"),
         }
     }
 
-    println!("\n=== 搜索结果汇总: {} 个平台返回结果 ===\n", all_results.len());
+    println!(
+        "\n=== 搜索结果汇总: {} 个平台返回结果 ===\n",
+        all_results.len()
+    );
 
     // Phase 2: Fetch lyrics from platforms that support it
     for r in &all_results {
@@ -83,13 +89,27 @@ async fn main() {
         let lyrics_text: Option<String> = match r.searcher_type {
             Searchers::Netease => {
                 let song_id: i64 = r.id.parse().unwrap_or(0);
-                match netease::api::get_lyrics(song_id).await {
-                    Some((lyric, _trans)) => lyric,
-                    None => {
-                        println!("  ❌ 获取歌词失败");
-                        println!();
-                        continue;
+                // 优先取逐字歌词（YRC），没有时回退到逐行歌词（LRC）。
+                let syllable_yrc = match netease::api::get_syllable_lyrics(song_id).await {
+                    Ok(syllable) => syllable.and_then(|syllable| syllable.yrc),
+                    Err(error) => {
+                        println!("  ⚠️ 逐字歌词获取失败，回退逐行: {error}");
+                        None
                     }
+                };
+                match syllable_yrc {
+                    Some(yrc) => {
+                        println!("  [逐字 YRC]");
+                        Some(yrc)
+                    }
+                    None => match netease::api::get_lyrics(song_id).await {
+                        Ok((lyric, _trans)) => lyric,
+                        Err(error) => {
+                            println!("  ❌ 获取歌词失败: {error}");
+                            println!();
+                            continue;
+                        }
+                    },
                 }
             }
             Searchers::QQMusic => {
@@ -100,10 +120,12 @@ async fn main() {
                     &r.artists,
                     &r.album,
                     r.duration_ms,
-                ).await {
-                    Some((lyric, _trans)) => lyric,
-                    None => {
-                        println!("  ❌ 获取歌词失败");
+                )
+                .await
+                {
+                    Ok((lyric, _trans)) => lyric,
+                    Err(error) => {
+                        println!("  ❌ 获取歌词失败: {error}");
                         println!();
                         continue;
                     }
@@ -113,9 +135,9 @@ async fn main() {
                 let keyword = format!("{} {}", r.title, r.artists);
                 let dur = r.duration_ms.unwrap_or(0);
                 match kugou::api::get_lyrics(&keyword, &r.id, dur).await {
-                    Some(l) => Some(l),
-                    None => {
-                        println!("  ❌ 获取歌词失败");
+                    Ok(l) => l,
+                    Err(error) => {
+                        println!("  ❌ 获取歌词失败: {error}");
                         println!();
                         continue;
                     }
@@ -124,9 +146,10 @@ async fn main() {
             Searchers::LRCLIB => {
                 let id: i32 = r.id.parse().unwrap_or(0);
                 match lrclib::api::get_by_id(id).await {
-                    Some(lr) => lr.synced_lyrics.or(lr.plain_lyrics),
-                    None => {
-                        println!("  ❌ 获取歌词失败");
+                    Ok(Some(lr)) => lr.synced_lyrics.or(lr.plain_lyrics),
+                    Ok(None) => None,
+                    Err(error) => {
+                        println!("  ❌ 获取歌词失败: {error}");
                         println!();
                         continue;
                     }
@@ -135,18 +158,48 @@ async fn main() {
             Searchers::Musixmatch => {
                 let track_id: i64 = r.id.parse().unwrap_or(0);
                 match musixmatch::api::get_token().await {
-                    Some(token) => {
-                        musixmatch::api::get_synced_lyrics(track_id, &token)
-                            .await
-                            .or_else(|| {
-                                // Block on the async plain lyrics fetch
-                                // Since we're already in async context, use futures::executor
-                                None // fallback: no synced, skip plain for simplicity
-                            })
+                    Ok(Some(token)) => {
+                        match musixmatch::api::get_synced_lyrics(track_id, &token).await {
+                            Ok(Some(synced)) => Some(synced),
+                            Ok(None) => match musixmatch::api::get_lyrics(track_id, &token).await {
+                                Ok(lyric) => lyric,
+                                Err(error) => {
+                                    println!("  ❌ 获取歌词失败: {error}");
+                                    println!();
+                                    continue;
+                                }
+                            },
+                            Err(error) => {
+                                println!("  ❌ 获取歌词失败: {error}");
+                                println!();
+                                continue;
+                            }
+                        }
                     }
-                    None => None,
+                    Ok(None) => None,
+                    Err(error) => {
+                        println!("  ❌ 获取 token 失败: {error}");
+                        println!();
+                        continue;
+                    }
                 }
             }
+            Searchers::SodaMusic => match soda_music::api::get_lyrics(&r.id).await {
+                Ok((lyric, trans)) => {
+                    if let Some(t) = &trans {
+                        let preview: Vec<&str> = t.lines().take(3).collect();
+                        for line in &preview {
+                            println!("  [译] {}", line);
+                        }
+                    }
+                    lyric
+                }
+                Err(error) => {
+                    println!("  ❌ 获取歌词失败: {error}");
+                    println!();
+                    continue;
+                }
+            },
             _ => {
                 println!("  ⚠️ 该平台暂不支持获取歌词");
                 println!();
@@ -167,7 +220,8 @@ async fn main() {
             // Try to parse
             let raw_type = lyrics_helper::helpers::type_helper::get_lyrics_types(text);
             if raw_type != LyricsRawTypes::Unknown {
-                if let Some(parsed) = lyrics_helper::parsers::parsers::parse_lyrics(text, raw_type) {
+                if let Some(parsed) = lyrics_helper::parsers::parsers::parse_lyrics(text, raw_type)
+                {
                     if let Some(ref lines) = parsed.lines {
                         println!("  ✅ 解析成功: {} 行, 格式: {:?}", lines.len(), raw_type);
                     }

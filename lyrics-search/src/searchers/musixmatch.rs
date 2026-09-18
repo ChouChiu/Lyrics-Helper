@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use lyrics_core::models::TrackMetadata;
 
+use crate::error::SearchError;
 use crate::providers::web::musixmatch::api;
 use crate::providers::web::musixmatch::response::Track;
 
@@ -15,19 +16,19 @@ pub struct MusixmatchSearcher;
 
 impl MusixmatchSearcher {
     /// 使用关键字搜索，并在提供曲目信息时按匹配度降序重排。
+    ///
+    /// `Ok(vec![])` 表示请求成功但没有相关结果；`Err` 表示请求失败。
     pub async fn search_for_results_async(
         keyword: Option<&str>,
         track: Option<&str>,
         artist: Option<&str>,
         duration_ms: Option<i32>,
-    ) -> Vec<SearchResult> {
+    ) -> Result<Vec<SearchResult>, SearchError> {
         let duration_secs = duration_ms.filter(|d| *d > 0).map(|d| d / 1000);
-        let tracks = api::search_tracks(keyword, track, artist, duration_secs)
-            .await
-            .unwrap_or_default();
+        let tracks = api::search_tracks(keyword, track, artist, duration_secs).await?;
 
         let results = tracks.iter().map(to_search_result).collect();
-        rank_results(results, track, artist, duration_ms)
+        Ok(rank_results(results, track, artist, duration_ms))
     }
 }
 
@@ -45,13 +46,11 @@ impl Searcher for MusixmatchSearcher {
         Searchers::Musixmatch
     }
 
-    async fn search_for_results_str(&self, search_string: &str) -> Option<Vec<SearchResult>> {
-        let results = Self::search_for_results_async(Some(search_string), None, None, None).await;
-        if results.is_empty() {
-            return None;
-        }
-
-        Some(results)
+    async fn search_for_results_str(
+        &self,
+        search_string: &str,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        Self::search_for_results_async(Some(search_string), None, None, None).await
     }
 }
 

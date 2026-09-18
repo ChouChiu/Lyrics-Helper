@@ -1,4 +1,7 @@
+use reqwest::Method;
+
 use super::response::{SearchResponse, TrackDetailResponse};
+use crate::error::SearchError;
 use crate::providers::web::base_api;
 use rand::Rng;
 use std::sync::LazyLock;
@@ -38,7 +41,10 @@ fn build_url(base: &str, path: &str, query: &[(&str, String)]) -> String {
 }
 
 /// 获取汽水音乐歌曲详情（H5 `seo_track` 接口）。
-pub async fn get_detail(track_id: &str) -> Option<TrackDetailResponse> {
+///
+/// 网络、HTTP 状态码或响应解码失败时返回 [`SearchError`]；`seo_track` 与 `track`
+/// 都缺失属于「响应成功但没有详情」，仍返回成功值。
+pub async fn get_detail(track_id: &str) -> Result<TrackDetailResponse, SearchError> {
     let query = [
         ("track_id", track_id.to_string()),
         ("device_platform", "web".to_string()),
@@ -49,7 +55,8 @@ pub async fn get_detail(track_id: &str) -> Option<TrackDetailResponse> {
         ("User-Agent", WEB_USER_AGENT),
     ];
 
-    let mut result: TrackDetailResponse = base_api::get_json_with_headers(&url, &headers).await?;
+    let response = base_api::send(Method::GET, &url, &headers).await?;
+    let mut result: TrackDetailResponse = base_api::json(response).await?;
 
     if let Some(seo_track) = result.seo_track.as_ref() {
         if result.track.is_none() {
@@ -60,22 +67,32 @@ pub async fn get_detail(track_id: &str) -> Option<TrackDetailResponse> {
         }
     }
 
-    Some(result)
+    Ok(result)
 }
 
 /// 获取汽水音乐歌词，返回 `(原文歌词, 翻译歌词)`。
-pub async fn get_lyrics(track_id: &str) -> Option<(Option<String>, Option<String>)> {
+///
+/// 请求成功但该曲目没有歌词（缺少 `lyric` 字段，或正文/翻译为空）时返回
+/// `Ok((None, None))` 对应的元素为 `None`；网络、HTTP 状态码或响应解码失败
+/// 返回 [`SearchError`]。
+pub async fn get_lyrics(track_id: &str) -> Result<(Option<String>, Option<String>), SearchError> {
     let detail = get_detail(track_id).await?;
-    let lyric = detail.lyric?;
+    let Some(lyric) = detail.lyric else {
+        return Ok((None, None));
+    };
     let original = lyric.content.filter(|c| !c.is_empty());
     let translation = lyric
         .translations
         .and_then(|t| t.cn)
         .filter(|c| !c.is_empty());
-    Some((original, translation))
+    Ok((original, translation))
 }
 
-pub(crate) async fn search(keyword: &str) -> Option<SearchResponse> {
+/// 搜索汽水音乐曲目。
+///
+/// 网络、HTTP 状态码或响应解码失败时返回 [`SearchError`]；
+/// 「搜索成功但没有匹配曲目」由响应内部的空结果表示，不是错误。
+pub(crate) async fn search(keyword: &str) -> Result<SearchResponse, SearchError> {
     let query = [
         ("device_platform", "android".to_string()),
         ("os", "android".to_string()),
@@ -111,5 +128,6 @@ pub(crate) async fn search(keyword: &str) -> Option<SearchResponse> {
 
     let url = build_url(API_BASE, "search/track", &query);
     let headers = [("Accept", "*/*"), ("User-Agent", SEARCH_USER_AGENT)];
-    base_api::get_json_with_headers(&url, &headers).await
+    let response = base_api::send(Method::GET, &url, &headers).await?;
+    base_api::json(response).await
 }

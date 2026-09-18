@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 
-use lyrics_core::models::TrackMetadata;
-use crate::providers::web::lrclib::api;
+use super::Searchers;
 use super::search_result::SearchResult;
 use super::searcher::Searcher;
-use super::Searchers;
+use crate::error::SearchError;
+use crate::providers::web::lrclib::api;
+use lyrics_core::models::TrackMetadata;
 
 /// LRCLIB 歌词搜索器。
 pub struct LRCLIBSearcher;
@@ -23,21 +24,29 @@ impl Searcher for LRCLIBSearcher {
         Searchers::LRCLIB
     }
 
-    async fn search_for_results_str(&self, search_string: &str) -> Option<Vec<SearchResult>> {
+    async fn search_for_results_str(
+        &self,
+        search_string: &str,
+    ) -> Result<Vec<SearchResult>, SearchError> {
         let results = api::search(search_string, None, None, None).await?;
-        if results.is_empty() {
-            return None;
-        }
-        Some(map_results(results))
+        Ok(map_results(results))
     }
 
-    async fn search_for_results(&self, track: &TrackMetadata) -> Option<Vec<SearchResult>> {
-        let title = track.title.as_deref()?;
+    /// 依次尝试精确获取、带过滤的搜索、不带过滤的搜索。
+    ///
+    /// 缺少曲名时无法构造任何查询，此时属于「没有结果」而非失败，返回 `Ok(vec![])`。
+    async fn search_for_results(
+        &self,
+        track: &TrackMetadata,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        let Some(title) = track.title.as_deref() else {
+            return Ok(Vec::new());
+        };
         let artist = track.artist.as_deref().unwrap_or("");
         let album = track.album.as_deref();
         let duration = track.duration_ms.map(|ms| ms as f64 / 1000.0);
 
-        if let Some(result) = api::get(title, artist, album, duration).await {
+        if let Some(result) = api::get(title, artist, album, duration).await? {
             let item = super::search_result::SearchResult {
                 searcher_type: Searchers::LRCLIB,
                 title: result.track_name,
@@ -49,20 +58,20 @@ impl Searcher for LRCLIBSearcher {
                 id: result.id.to_string(),
                 numeric_id: None,
             };
-            return Some(vec![item]);
+            return Ok(vec![item]);
         }
 
-        let results = api::search(title, Some(artist), album, duration).await;
-        if let Some(r) = results.filter(|r| !r.is_empty()) {
-            return Some(map_results(r));
+        let results = api::search(title, Some(artist), album, duration).await?;
+        if !results.is_empty() {
+            return Ok(map_results(results));
         }
 
-        let search_string = format!("{} {}", title, artist).replace(" - ", " ").trim().to_string();
+        let search_string = format!("{} {}", title, artist)
+            .replace(" - ", " ")
+            .trim()
+            .to_string();
         let results = api::search(&search_string, None, None, None).await?;
-        if results.is_empty() {
-            return None;
-        }
-        Some(map_results(results))
+        Ok(map_results(results))
     }
 }
 
@@ -77,7 +86,9 @@ fn parse_artists(artist_str: &str) -> Vec<String> {
         .collect()
 }
 
-fn map_results(results: Vec<super::super::providers::web::lrclib::response::SearchResultItem>) -> Vec<SearchResult> {
+fn map_results(
+    results: Vec<super::super::providers::web::lrclib::response::SearchResultItem>,
+) -> Vec<SearchResult> {
     results
         .into_iter()
         .map(|item| SearchResult {

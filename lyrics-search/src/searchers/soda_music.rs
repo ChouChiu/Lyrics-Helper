@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use super::Searchers;
 use super::search_result::SearchResult;
 use super::searcher::Searcher;
+use crate::error::SearchError;
 use crate::providers::web::soda_music::api;
 use crate::providers::web::soda_music::response::SearchResponse;
 
@@ -23,15 +24,14 @@ impl Searcher for SodaMusicSearcher {
         Searchers::SodaMusic
     }
 
-    async fn search_for_results_str(&self, search_string: &str) -> Option<Vec<SearchResult>> {
+    async fn search_for_results_str(
+        &self,
+        search_string: &str,
+    ) -> Result<Vec<SearchResult>, SearchError> {
         let response = api::search(search_string).await?;
 
-        let search_results = map_results(response);
-        if search_results.is_empty() {
-            return None;
-        }
-
-        Some(search_results)
+        // 缺少 result_groups 只是「没有匹配」，由 `map_results` 映射为空列表。
+        Ok(map_results(response))
     }
 }
 

@@ -56,7 +56,7 @@ async fn main() {
     for (name, searcher) in &platforms {
         print!("  搜索 {} ... ", name);
         match search_for_best_result(*searcher, &track).await {
-            Some(r) => {
+            Ok(Some(r)) => {
                 let artists = r.artist();
                 println!("✅ {} - {} (匹配: {:?})", r.title, artists, r.match_type);
                 all_results.push(SearchResultWithPlatform {
@@ -71,7 +71,8 @@ async fn main() {
                     duration_ms: r.duration_ms,
                 });
             }
-            None => println!("❌ 未找到"),
+            Ok(None) => println!("❌ 未找到"),
+            Err(error) => println!("❌ 搜索失败: {error}"),
         }
     }
 
@@ -89,18 +90,22 @@ async fn main() {
             Searchers::Netease => {
                 let song_id: i64 = r.id.parse().unwrap_or(0);
                 // 优先取逐字歌词（YRC），没有时回退到逐行歌词（LRC）。
-                match netease::api::get_syllable_lyrics(song_id)
-                    .await
-                    .and_then(|syllable| syllable.yrc)
-                {
+                let syllable_yrc = match netease::api::get_syllable_lyrics(song_id).await {
+                    Ok(syllable) => syllable.and_then(|syllable| syllable.yrc),
+                    Err(error) => {
+                        println!("  ⚠️ 逐字歌词获取失败，回退逐行: {error}");
+                        None
+                    }
+                };
+                match syllable_yrc {
                     Some(yrc) => {
                         println!("  [逐字 YRC]");
                         Some(yrc)
                     }
                     None => match netease::api::get_lyrics(song_id).await {
-                        Some((lyric, _trans)) => lyric,
-                        None => {
-                            println!("  ❌ 获取歌词失败");
+                        Ok((lyric, _trans)) => lyric,
+                        Err(error) => {
+                            println!("  ❌ 获取歌词失败: {error}");
                             println!();
                             continue;
                         }
@@ -118,9 +123,9 @@ async fn main() {
                 )
                 .await
                 {
-                    Some((lyric, _trans)) => lyric,
-                    None => {
-                        println!("  ❌ 获取歌词失败");
+                    Ok((lyric, _trans)) => lyric,
+                    Err(error) => {
+                        println!("  ❌ 获取歌词失败: {error}");
                         println!();
                         continue;
                     }
@@ -130,9 +135,9 @@ async fn main() {
                 let keyword = format!("{} {}", r.title, r.artists);
                 let dur = r.duration_ms.unwrap_or(0);
                 match kugou::api::get_lyrics(&keyword, &r.id, dur).await {
-                    Some(l) => Some(l),
-                    None => {
-                        println!("  ❌ 获取歌词失败");
+                    Ok(l) => l,
+                    Err(error) => {
+                        println!("  ❌ 获取歌词失败: {error}");
                         println!();
                         continue;
                     }
@@ -141,9 +146,10 @@ async fn main() {
             Searchers::LRCLIB => {
                 let id: i32 = r.id.parse().unwrap_or(0);
                 match lrclib::api::get_by_id(id).await {
-                    Some(lr) => lr.synced_lyrics.or(lr.plain_lyrics),
-                    None => {
-                        println!("  ❌ 获取歌词失败");
+                    Ok(Some(lr)) => lr.synced_lyrics.or(lr.plain_lyrics),
+                    Ok(None) => None,
+                    Err(error) => {
+                        println!("  ❌ 获取歌词失败: {error}");
                         println!();
                         continue;
                     }
@@ -152,18 +158,35 @@ async fn main() {
             Searchers::Musixmatch => {
                 let track_id: i64 = r.id.parse().unwrap_or(0);
                 match musixmatch::api::get_token().await {
-                    Some(token) => {
+                    Ok(Some(token)) => {
                         match musixmatch::api::get_synced_lyrics(track_id, &token).await {
-                            Some(synced) => Some(synced),
-                            None => musixmatch::api::get_lyrics(track_id, &token).await,
+                            Ok(Some(synced)) => Some(synced),
+                            Ok(None) => match musixmatch::api::get_lyrics(track_id, &token).await {
+                                Ok(lyric) => lyric,
+                                Err(error) => {
+                                    println!("  ❌ 获取歌词失败: {error}");
+                                    println!();
+                                    continue;
+                                }
+                            },
+                            Err(error) => {
+                                println!("  ❌ 获取歌词失败: {error}");
+                                println!();
+                                continue;
+                            }
                         }
                     }
-                    None => None,
+                    Ok(None) => None,
+                    Err(error) => {
+                        println!("  ❌ 获取 token 失败: {error}");
+                        println!();
+                        continue;
+                    }
                 }
             }
             Searchers::SodaMusic => match soda_music::api::get_lyrics(&r.id).await {
-                Some((lyric, trans)) => {
-                    if let Some(ref t) = trans {
+                Ok((lyric, trans)) => {
+                    if let Some(t) = &trans {
                         let preview: Vec<&str> = t.lines().take(3).collect();
                         for line in &preview {
                             println!("  [译] {}", line);
@@ -171,8 +194,8 @@ async fn main() {
                     }
                     lyric
                 }
-                None => {
-                    println!("  ❌ 获取歌词失败");
+                Err(error) => {
+                    println!("  ❌ 获取歌词失败: {error}");
                     println!();
                     continue;
                 }

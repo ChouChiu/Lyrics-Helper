@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 
 use super::response::{LyricsResponse, MusicuResponse};
+use crate::error::SearchError;
 use crate::providers::web::base_api;
 
 const QQ_HEADERS: &[(&str, &str)] = &[
@@ -108,7 +109,12 @@ struct SessionInfo {
 
 static SESSION: OnceCell<Option<(String, String, String)>> = OnceCell::const_new();
 
-async fn init_session() -> Option<(String, String, String)> {
+/// 初始化 QQ 音乐匿名 session。
+///
+/// `Ok(None)` 表示平台在 2xx 里没有下发 session（缺 `request` / `data` / `session`），
+/// 属于「没有数据」而非失败；请求失败或平台返回非 0 业务码时返回 [`SearchError`]。
+/// 两种情况都由 [`get_session`] 降级成「没有 session」，不会打断搜索与取词。
+async fn init_session() -> Result<Option<(String, String, String)>, SearchError> {
     let comm = Comm {
         ct: 11,
         cv: "1003006".to_string(),
@@ -138,28 +144,43 @@ async fn init_session() -> Option<(String, String, String)> {
     };
 
     let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
-    let resp = base_api::post_json_raw_with_headers(url, &body, QQ_HEADERS).await?;
-    let session_resp: SessionResponse = serde_json::from_str(&resp).ok()?;
+    let response = base_api::send_json(url, &body, QQ_HEADERS).await?;
+    let session_resp: SessionResponse = base_api::json(response).await?;
 
-    if session_resp.code? != 0 {
-        eprintln!(
-            "  [QQMusic] Session init failed: code {}",
-            session_resp.code.unwrap_or(-1)
-        );
-        return None;
+    // 缺 `code` 字段按上游 C# 的语义视作成功（C# 的 `int` 默认值即 0），只有非 0 才是业务失败。
+    match session_resp.code {
+        None | Some(0) => {}
+        Some(code) => {
+            return Err(SearchError::Api(format!(
+                "QQ 音乐 session 初始化失败：code {code}"
+            )));
+        }
     }
 
-    let data = session_resp.request?.data?;
-    let session = data.session?;
-    Some((
+    let Some(session) = session_resp
+        .request
+        .and_then(|request| request.data)
+        .and_then(|data| data.session)
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some((
         session.uid.unwrap_or_else(|| "0".to_string()),
         session.sid.unwrap_or_default(),
         session.userip.unwrap_or_default(),
-    ))
+    )))
 }
 
+/// 取缓存的匿名 session。
+///
+/// 拿不到 session 时返回 `None`：[`init_session`] 的任何失败在这里都被有意降级为
+/// 「没有 session」，调用方 [`get_comm`] 随即退化成与既有行为完全相同的匿名兜底身份
+/// （`uid = "0"`，无 `sid` / `userip`），因此不影响搜索与取词。
 async fn get_session() -> &'static Option<(String, String, String)> {
-    SESSION.get_or_init(init_session).await
+    SESSION
+        .get_or_init(|| async { init_session().await.ok().flatten() })
+        .await
 }
 
 async fn get_comm() -> Comm {
@@ -193,7 +214,7 @@ fn generate_search_id() -> String {
     (part1 + part2 + part3).to_string()
 }
 
-pub(crate) async fn search(keyword: &str) -> Option<MusicuResponse> {
+pub(crate) async fn search(keyword: &str) -> Result<MusicuResponse, SearchError> {
     let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
     let body = MusicuBody {
         comm: get_comm().await,
@@ -215,23 +236,8 @@ pub(crate) async fn search(keyword: &str) -> Option<MusicuResponse> {
         },
     };
 
-    let resp = base_api::post_json_raw_with_headers(url, &body, QQ_HEADERS).await;
-    match resp {
-        Some(text) => {
-            let result: Option<MusicuResponse> = serde_json::from_str(&text).ok();
-            if result.is_none() {
-                eprintln!(
-                    "  [QQMusic] Failed to parse response: {}",
-                    truncate_for_log(&text)
-                );
-            }
-            result
-        }
-        None => {
-            eprintln!("  [QQMusic] HTTP request failed");
-            None
-        }
-    }
+    let response = base_api::send_json(url, &body, QQ_HEADERS).await?;
+    base_api::json(response).await
 }
 
 #[derive(Serialize)]
@@ -279,6 +285,9 @@ struct LyricsBody {
 }
 
 /// 获取 QQ 音乐歌词，返回 `(原文歌词, 翻译歌词)` 元组。
+///
+/// 请求成功但平台没给歌词（缺 `request` / `data`）或解密后没有正文时，对应元素为 `Ok(None)`；
+/// 网络、状态码或响应格式失败返回 [`SearchError`]。
 pub async fn get_lyrics(
     song_mid: &str,
     song_id: Option<i64>,
@@ -286,7 +295,7 @@ pub async fn get_lyrics(
     artist: &str,
     album: &str,
     duration_ms: Option<i32>,
-) -> Option<(Option<String>, Option<String>)> {
+) -> Result<(Option<String>, Option<String>), SearchError> {
     let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
     let interval = duration_ms.unwrap_or(0) / 1000;
 
@@ -317,16 +326,13 @@ pub async fn get_lyrics(
         },
     };
 
-    let resp = base_api::post_json_raw_with_headers(url, &body, QQ_HEADERS).await?;
-    let result: Option<LyricsResponse> = serde_json::from_str(&resp).ok();
-    if result.is_none() {
-        eprintln!(
-            "  [QQMusic] Failed to parse lyrics response: {}",
-            truncate_for_log(&resp)
-        );
-    }
+    let response = base_api::send_json(url, &body, QQ_HEADERS).await?;
+    let result: LyricsResponse = base_api::json(response).await?;
 
-    let data = result?.request?.data?;
+    // 平台没返回歌词数据属于「这首没有歌词」，不是错误。
+    let Some(data) = result.request.and_then(|request| request.data) else {
+        return Ok((None, None));
+    };
 
     let lyric = decrypt_qrc_lyric(
         &data.lyric,
@@ -337,19 +343,7 @@ pub async fn get_lyrics(
     let trans = decrypt_qrc_lyric(&data.trans, data.trans_t.unwrap_or(0), 0)
         .and_then(|text| extract_lyric_content(&text));
 
-    Some((lyric, trans))
-}
-
-/// 截取用于日志输出的前缀（按字符边界截断，避免切坏多字节字符）。
-fn truncate_for_log(text: &str) -> &str {
-    if text.len() <= 500 {
-        return text;
-    }
-    let mut end = 500;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
+    Ok((lyric, trans))
 }
 
 /// QRC XML 节点与结果名的映射，对应上游 `VerbatimXmlMappingDict`。

@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 
-use crate::providers::web::qq_music::api;
+use super::Searchers;
 use super::search_result::SearchResult;
 use super::searcher::Searcher;
-use super::Searchers;
+use crate::error::SearchError;
+use crate::providers::web::qq_music::api;
 
 /// QQ 音乐歌词搜索器。
 pub struct QQMusicSearcher;
@@ -22,25 +23,40 @@ impl Searcher for QQMusicSearcher {
         Searchers::QQMusic
     }
 
-    async fn search_for_results_str(&self, search_string: &str) -> Option<Vec<SearchResult>> {
+    async fn search_for_results_str(
+        &self,
+        search_string: &str,
+    ) -> Result<Vec<SearchResult>, SearchError> {
         let response = api::search(search_string).await?;
 
         if let Some(code) = response.code {
             if code != 0 {
-                eprintln!("  [QQMusic] API error code: {}", code);
-                return None;
+                return Err(SearchError::Api(format!("QQ 音乐搜索返回错误码 {code}")));
             }
         }
 
-        let req = response.request?;
+        let req = match response.request {
+            Some(req) => req,
+            // 缺少 request 只是「没有匹配」，不是错误。
+            None => return Ok(Vec::new()),
+        };
+
         if let Some(code) = req.code {
             if code != 0 {
-                eprintln!("  [QQMusic] Request error code: {}", code);
-                return None;
+                return Err(SearchError::Api(format!(
+                    "QQ 音乐搜索请求返回错误码 {code}"
+                )));
             }
         }
 
-        let songs = req.data?.body?.item_song?;
+        // 缺少 data / body / item_song 都只是「没有匹配」，不是错误。
+        let Some(songs) = req
+            .data
+            .and_then(|data| data.body)
+            .and_then(|body| body.item_song)
+        else {
+            return Ok(Vec::new());
+        };
 
         let search_results: Vec<SearchResult> = songs
             .into_iter()
@@ -66,10 +82,6 @@ impl Searcher for QQMusicSearcher {
             })
             .collect();
 
-        if search_results.is_empty() {
-            return None;
-        }
-
-        Some(search_results)
+        Ok(search_results)
     }
 }

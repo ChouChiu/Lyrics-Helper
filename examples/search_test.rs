@@ -1,3 +1,4 @@
+use lyrics_helper::models::TrackMetadata;
 use lyrics_helper::searchers::apple_music::AppleMusicSearcher;
 use lyrics_helper::searchers::kugou::KugouSearcher;
 use lyrics_helper::searchers::lrclib::LRCLIBSearcher;
@@ -8,7 +9,6 @@ use lyrics_helper::searchers::search_for_best_result;
 use lyrics_helper::searchers::searcher::Searcher;
 use lyrics_helper::searchers::soda_music::SodaMusicSearcher;
 use lyrics_helper::searchers::spotify::SpotifySearcher;
-use lyrics_helper::models::TrackMetadata;
 
 #[tokio::main]
 async fn main() {
@@ -37,7 +37,7 @@ async fn main() {
     for (name, searcher) in &platforms {
         println!("--- {} ---", name);
         match search_for_best_result(*searcher, &track).await {
-            Some(best) => {
+            Ok(Some(best)) => {
                 println!("  标题: {}", best.title);
                 println!("  艺术家: {}", best.artist());
                 println!("  专辑: {}", best.album);
@@ -45,7 +45,8 @@ async fn main() {
                 println!("  匹配: {:?}", best.match_type);
                 println!("  ID: {}", best.id);
             }
-            None => println!("  未找到匹配"),
+            Ok(None) => println!("  未找到匹配"),
+            Err(error) => println!("  搜索失败: {error}"),
         }
         println!();
     }

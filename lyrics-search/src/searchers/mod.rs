@@ -11,6 +11,7 @@ pub mod soda_music;
 pub mod spotify;
 
 use compare_helper::*;
+use crate::error::SearchError;
 use lyrics_core::models::TrackMetadata;
 use search_result::SearchResult;
 use searcher::Searcher;
@@ -161,14 +162,18 @@ pub fn build_refinement_queries(track: &TrackMetadata) -> Vec<String> {
 
 /// 使用渐进式搜索策略搜索歌词，先尝试精确匹配，失败后逐步放宽搜索条件。
 ///
-/// 返回按匹配度排序的搜索结果列表。
+/// 返回按匹配度排序的搜索结果列表。任何一层拿到结果即返回 `Ok(结果)`；
+/// 全部层都没有结果、且至少有一层请求失败时返回 `Err`（最后一次错误）；
+/// 没有结果也没有失败时返回 `Ok(vec![])`。
 pub async fn search_with_refinement(
     searcher: &dyn Searcher,
     track: &TrackMetadata,
     full_search: bool,
-) -> Vec<SearchResult> {
-    if let Some(results) = searcher.search_for_results(track).await {
-        if !results.is_empty() {
+) -> Result<Vec<SearchResult>, SearchError> {
+    let mut last_error: Option<SearchError> = None;
+
+    match searcher.search_for_results(track).await {
+        Ok(results) if !results.is_empty() => {
             let mut results = results;
             for result in &mut results {
                 result.match_type = Some(compare_track_result(track, result));
@@ -178,8 +183,10 @@ pub async fn search_with_refinement(
                 let b_val = b.match_type.map(|m| m as i32).unwrap_or(-1);
                 b_val.cmp(&a_val)
             });
-            return results;
+            return Ok(results);
         }
+        Ok(_) => {}
+        Err(error) => last_error = Some(error),
     }
 
     let initial_query = build_search_string(track);
@@ -189,10 +196,9 @@ pub async fn search_with_refinement(
     let mut current_query = initial_query;
 
     for level in 0..=refinements.len() {
-        if let Some(results) = searcher.search_for_results_str(&current_query).await {
-            if !results.is_empty() {
-                all_results.extend(results);
-            }
+        match searcher.search_for_results_str(&current_query).await {
+            Ok(results) => all_results.extend(results),
+            Err(error) => last_error = Some(error),
         }
 
         if !full_search && !all_results.is_empty() {
@@ -209,6 +215,13 @@ pub async fn search_with_refinement(
         }
     }
 
+    // 没有任何结果时才把失败当成失败；拿到结果说明这次搜索是成功的。
+    if all_results.is_empty() {
+        if let Some(error) = last_error {
+            return Err(error);
+        }
+    }
+
     for result in &mut all_results {
         result.match_type = Some(compare_track_result(track, result));
     }
@@ -219,42 +232,66 @@ pub async fn search_with_refinement(
         b_val.cmp(&a_val)
     });
 
-    all_results
+    Ok(all_results)
 }
 
 /// 搜索并返回匹配度最高的单条搜索结果。
+///
+/// 先做一轮不完整搜索，再做一轮完整搜索（两段式与旧行为一致）。
+/// 任何一轮拿到结果即返回 `Ok(Some(第一个))`；两轮都没有结果且至少有一轮失败时
+/// 返回 `Err`（优先返回第一轮的错误）；两轮都成功但没有结果时返回 `Ok(None)`。
 pub async fn search_for_best_result(
     searcher: &dyn Searcher,
     track: &TrackMetadata,
-) -> Option<SearchResult> {
-    let results = search_with_refinement(searcher, track, false).await;
-    if !results.is_empty() {
-        return Some(results.into_iter().next().unwrap());
-    }
+) -> Result<Option<SearchResult>, SearchError> {
+    let first_error = match search_with_refinement(searcher, track, false).await {
+        Ok(results) => {
+            if let Some(first) = results.into_iter().next() {
+                return Ok(Some(first));
+            }
+            None
+        }
+        Err(error) => Some(error),
+    };
 
-    let results = search_with_refinement(searcher, track, true).await;
-    results.into_iter().next()
+    match search_with_refinement(searcher, track, true).await {
+        Ok(results) => Ok(results.into_iter().next()),
+        Err(error) => Err(first_error.unwrap_or(error)),
+    }
 }
 
-/// 搜索并返回匹配度不低于指定等级的单条搜索结果，无满足条件的结果时返回 `None`。
+/// 搜索并返回匹配度不低于指定等级的单条搜索结果。
+///
+/// 与 [`search_for_best_result`] 相同的两段式搜索，但每轮只有第一条结果达到
+/// `minimum_match` 时才返回该轮结果。两轮都被阈值挡下且至少有一轮失败时返回
+/// `Err`（优先返回第一轮的错误）；两轮都成功但没有合格结果时返回 `Ok(None)`。
 pub async fn search_for_best_result_with_match(
     searcher: &dyn Searcher,
     track: &TrackMetadata,
     minimum_match: MatchType,
-) -> Option<SearchResult> {
-    let results = search_with_refinement(searcher, track, false).await;
-    if let Some(first) = results.first() {
-        if first.match_type.is_some_and(|m| m >= minimum_match) {
-            return Some(results.into_iter().next().unwrap());
+) -> Result<Option<SearchResult>, SearchError> {
+    let mut first_error: Option<SearchError> = None;
+
+    for full_search in [false, true] {
+        match search_with_refinement(searcher, track, full_search).await {
+            Ok(results) => {
+                let matched = results
+                    .first()
+                    .is_some_and(|first| first.match_type.is_some_and(|m| m >= minimum_match));
+                if matched {
+                    return Ok(results.into_iter().next());
+                }
+            }
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
         }
     }
 
-    let results = search_with_refinement(searcher, track, true).await;
-    if let Some(first) = results.first() {
-        if first.match_type.is_some_and(|m| m >= minimum_match) {
-            return Some(results.into_iter().next().unwrap());
-        }
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(None),
     }
-
-    None
 }

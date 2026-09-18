@@ -10,6 +10,7 @@ use rand::Rng;
 use regex::Regex;
 use serde_json::{Value, json};
 
+use crate::error::SearchError;
 use crate::providers::web::base_api;
 
 /// eapi 专用 User-Agent，对应 C# `EapiHelper.userAgent`。
@@ -22,30 +23,35 @@ static EAPI_URL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\w*api").unw
 
 /// 以 eapi 协议向 `url` 发送 POST 请求，返回响应文本。
 ///
-/// `data` 必须为 JSON 对象，函数会按 eapi 要求追加 `header` 字段。
-pub(super) async fn post(url: &str, data: Value) -> Option<String> {
+/// `data` 必须为 JSON 对象，函数会按 eapi 要求追加 `header` 字段；
+/// 入参或内部构造的请求头不是 JSON 对象时返回 [`SearchError::Payload`]，
+/// 请求或读取响应失败时返回对应的 [`SearchError`]。
+pub(super) async fn post(url: &str, data: Value) -> Result<String, SearchError> {
     let Value::Object(mut data) = data else {
-        return None;
+        return Err(SearchError::Payload(
+            "eapi 请求参数必须是 JSON 对象".to_string(),
+        ));
     };
 
     let header = request_header();
     let cookie = header
-        .as_object()?
+        .as_object()
+        .ok_or_else(|| SearchError::Payload("eapi 请求头必须是 JSON 对象".to_string()))?
         .iter()
         .map(|(key, value)| format!("{key}={}", value.as_str().unwrap_or_default()))
         .collect::<Vec<_>>()
         .join("; ");
     data.insert(
         "header".to_string(),
-        Value::String(serde_json::to_string(&header).ok()?),
+        Value::String(serde_json::to_string(&header)?),
     );
 
     let params = lyrics_crypto::decrypter::netease::eapi::encrypt_params(
         url,
-        &serde_json::to_string(&data).ok()?,
+        &serde_json::to_string(&data)?,
     );
 
-    base_api::post_form_raw_with_headers(
+    let response = base_api::send_form(
         &EAPI_URL_RE.replace(url, "eapi"),
         &[("params", params.as_str())],
         &[
@@ -54,7 +60,9 @@ pub(super) async fn post(url: &str, data: Value) -> Option<String> {
             ("Cookie", cookie.as_str()),
         ],
     )
-    .await
+    .await?;
+
+    base_api::text(response).await
 }
 
 /// 构造 eapi 请求的公共参数与同名 Cookie，对应 C# `EapiHelper.PostAsync` 中的 `header`。
