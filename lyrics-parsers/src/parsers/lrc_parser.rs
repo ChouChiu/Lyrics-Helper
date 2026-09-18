@@ -57,10 +57,7 @@ fn parse_core(input: &str, collect_attributes: bool) -> ParseCoreResult {
                     let text: String = chars[cur_state_start_position + 1..i].iter().collect();
                     let trimmed = text.trim().to_string();
                     for ts in cur_timestamps.iter().take_while(|&&t| t != -1) {
-                        lines.push(LineInfo::new_line_with_time(
-                            trimmed.clone(),
-                            *ts - offset,
-                        ));
+                        lines.push(LineInfo::new_line_with_time(trimmed.clone(), *ts - offset));
                     }
                     if i + 1 < chars.len() && (chars[i + 1] == '\n' || chars[i + 1] == '\r') {
                         i += 1;
@@ -80,14 +77,18 @@ fn parse_core(input: &str, collect_attributes: bool) -> ParseCoreResult {
         }
 
         if reaches_end && state == CurrentState::Lyric {
-            let text: String = chars[cur_state_start_position + 1..i].iter().collect();
-            let trim_end = if last_character_is_line_break { 1 } else { 0 };
-            let trimmed = text[..text.len() - trim_end].trim().to_string();
+            // 与上游一致：截取到最后一个字符（含），结尾是换行时再排除该换行。
+            // 索引基于 char，避免按字节切分拆开多字节字符。
+            let start = cur_state_start_position + 1;
+            let end = i + 1 - usize::from(last_character_is_line_break);
+            let text: String = if end > start {
+                chars[start..end].iter().collect()
+            } else {
+                String::new()
+            };
+            let trimmed = text.trim().to_string();
             for ts in cur_timestamps.iter().take_while(|&&t| t != -1) {
-                lines.push(LineInfo::new_line_with_time(
-                    trimmed.clone(),
-                    *ts - offset,
-                ));
+                lines.push(LineInfo::new_line_with_time(trimmed.clone(), *ts - offset));
             }
             i += 1;
             continue;
@@ -168,7 +169,8 @@ fn parse_core(input: &str, collect_attributes: bool) -> ParseCoreResult {
                     state = CurrentState::None;
                 }
                 if attribute_name == "offset" && cur_char != ']' {
-                    time_calculation_cache = time_calculation_cache * 10 + (cur_char as i32 - '0' as i32);
+                    time_calculation_cache =
+                        time_calculation_cache * 10 + (cur_char as i32 - '0' as i32);
                     i += 1;
                     continue;
                 }
@@ -176,7 +178,8 @@ fn parse_core(input: &str, collect_attributes: bool) -> ParseCoreResult {
             CurrentState::Timestamp => {
                 if time_stamp_type == TimeStampType::Milliseconds {
                     if cur_char != ']' {
-                        time_calculation_cache = time_calculation_cache * 10 + (cur_char as i32 - '0' as i32);
+                        time_calculation_cache =
+                            time_calculation_cache * 10 + (cur_char as i32 - '0' as i32);
                         i += 1;
                         continue;
                     } else {
@@ -218,7 +221,8 @@ fn parse_core(input: &str, collect_attributes: bool) -> ParseCoreResult {
                         if current_timestamp_position + 1 >= cur_timestamps.len() {
                             cur_timestamps.extend(vec![-1i32; cur_timestamps.len()]);
                         }
-                        cur_timestamps[current_timestamp_position] = (cur_timestamp + time_calculation_cache) * 1000;
+                        cur_timestamps[current_timestamp_position] =
+                            (cur_timestamp + time_calculation_cache) * 1000;
                         current_timestamp_position += 1;
                         time_calculation_cache = 0;
                         cur_state_start_position = i;
@@ -229,7 +233,8 @@ fn parse_core(input: &str, collect_attributes: bool) -> ParseCoreResult {
                         continue;
                     }
                     _ => {
-                        time_calculation_cache = time_calculation_cache * 10 + (cur_char as i32 - '0' as i32);
+                        time_calculation_cache =
+                            time_calculation_cache * 10 + (cur_char as i32 - '0' as i32);
                     }
                 }
             }

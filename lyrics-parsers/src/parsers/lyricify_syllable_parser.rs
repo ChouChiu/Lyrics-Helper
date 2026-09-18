@@ -1,6 +1,6 @@
-use regex::Regex;
-use lyrics_core::models::*;
 use crate::parsers::attributes_helper;
+use lyrics_core::models::*;
+use regex::Regex;
 
 /// 解析 Lyricify Syllable 格式歌词，支持背景人声检测和对齐信息，返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
@@ -17,7 +17,10 @@ pub fn parse(input: &str) -> LyricsData {
         writers: None,
     };
 
-    let offset = attributes_helper::parse_general_attributes_to_lyrics_data_from_lines(&mut data, &mut lyrics_lines);
+    let offset = attributes_helper::parse_general_attributes_to_lyrics_data_from_lines(
+        &mut data,
+        &mut lyrics_lines,
+    );
     let lines = parse_lyrics(&lyrics_lines, offset);
     data.lines = Some(lines);
     data
@@ -95,7 +98,7 @@ fn parse_lyrics_line_with_state(line: &str) -> Option<(LineInfo, Option<bool>)> 
         return None;
     }
 
-    let mut line_info = LineInfo::new_syllable(syllables);
+    let mut line_info = LineInfo::new_syllable(to_syllable_items(syllables));
     line_info.set_alignment(alignment);
 
     Some((line_info, is_background_vocals))
@@ -123,8 +126,10 @@ fn set_background_vocals_info(list: Vec<(LineInfo, Option<bool>)>) -> Vec<LineIn
 
     let mut i = 1;
     while i < items.len() {
-        if items[i].1.is_none() && is_bracketed_lyrics(&items[i].0)
-            && is_not_bg(&items[i - 1]) && items[i].0.sub_line().is_none()
+        if items[i].1.is_none()
+            && is_bracketed_lyrics(&items[i].0)
+            && is_not_bg(&items[i - 1])
+            && items[i].0.sub_line().is_none()
             && (i + 1 >= items.len() || is_not_bg(&items[i + 1]))
         {
             let sub_line = items[i].0.clone();
@@ -139,5 +144,6 @@ fn set_background_vocals_info(list: Vec<(LineInfo, Option<bool>)>) -> Vec<LineIn
 
 fn is_bracketed_lyrics(line: &LineInfo) -> bool {
     let text = line.text_from_any();
-    (text.starts_with('(') || text.starts_with('（')) && (text.ends_with(')') || text.ends_with('）'))
+    (text.starts_with('(') || text.starts_with('（'))
+        && (text.ends_with(')') || text.ends_with('）'))
 }

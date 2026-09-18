@@ -1,9 +1,10 @@
+use crate::parsers::attributes_helper;
+use lyrics_core::models::*;
 use regex::Regex;
 use std::sync::LazyLock;
-use lyrics_core::models::*;
-use crate::parsers::attributes_helper;
 
-static QRC_SYLLABLE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(.*?)\((\d+),(\d+)\)").unwrap());
+static QRC_SYLLABLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(.*?)\((\d+),(\d+)\)").unwrap());
 
 /// 解析 QRC 格式歌词，返回包含属性信息的逐音节同步 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
@@ -19,7 +20,10 @@ pub fn parse(input: &str) -> LyricsData {
         writers: None,
     };
 
-    let offset = attributes_helper::parse_general_attributes_to_lyrics_data_from_lines(&mut data, &mut lyrics_lines);
+    let offset = attributes_helper::parse_general_attributes_to_lyrics_data_from_lines(
+        &mut data,
+        &mut lyrics_lines,
+    );
     let lines = parse_lyrics(&lyrics_lines, offset);
     data.lines = Some(lines);
     data
@@ -65,5 +69,5 @@ pub fn parse_lyrics_line(line: &str) -> Option<LineInfo> {
         }
     }
 
-    Some(LineInfo::new_syllable(syllables))
+    Some(LineInfo::new_syllable(to_syllable_items(syllables)))
 }

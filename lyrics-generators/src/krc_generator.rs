@@ -1,4 +1,6 @@
+use crate::syllable_info;
 use lyrics_core::models::*;
+use std::fmt::Write;
 
 /// 将歌词数据生成为 KRC 逐字歌词格式字符串。
 pub fn generate(lyrics_data: &LyricsData) -> String {
@@ -6,72 +8,12 @@ pub fn generate(lyrics_data: &LyricsData) -> String {
 
     if let Some(ref lines) = lyrics_data.lines {
         for line in lines {
-            if let Some((syllables, start_time, end_time)) = get_syllable_info(line) {
-                if let (Some(st), Some(et)) = (start_time, end_time) {
-                    let duration = et - st;
-                    result.push_str(&format!(
-                        "[{},{}]",
-                        st,
-                        duration
-                    ));
-                }
-
-                // First syllable uses <offset,duration,0> format
-                if let Some(first) = syllables.first() {
-                    let offset = first.start_time - start_time.unwrap_or(0);
-                    result.push_str(&format!(
-                        "<{},{},0>{}",
-                        offset,
-                        first.duration(),
-                        first.text
-                    ));
-                }
-
-                // Subsequent syllables use ,0><offset,duration,0> format
-                for syllable in syllables.iter().skip(1) {
-                    let offset = syllable.start_time - start_time.unwrap_or(0);
-                    result.push_str(&format!(
-                        ",0><{},{},0>{}",
-                        offset,
-                        syllable.duration(),
-                        syllable.text
-                    ));
-                }
-
-                result.push('\n');
+            if let Some((syllables, start_time, _)) = syllable_info(line) {
+                append_line(&mut result, &syllables, start_time);
 
                 if let Some(sub) = line.sub_line() {
-                    if let Some((sub_syllables, sub_start, sub_end)) = get_syllable_info(sub) {
-                        if let (Some(st), Some(et)) = (sub_start, sub_end) {
-                            let duration = et - st;
-                            result.push_str(&format!(
-                                "[{},{}]",
-                                st,
-                                duration
-                            ));
-                        }
-
-                        if let Some(first) = sub_syllables.first() {
-                            let offset = first.start_time - sub_start.unwrap_or(0);
-                            result.push_str(&format!(
-                                "<{},{},0>{}",
-                                offset,
-                                first.duration(),
-                                first.text
-                            ));
-                        }
-
-                        for syllable in sub_syllables.iter().skip(1) {
-                            let offset = syllable.start_time - sub_start.unwrap_or(0);
-                            result.push_str(&format!(
-                                ",0><{},{},0>{}",
-                                offset,
-                                syllable.duration(),
-                                syllable.text
-                            ));
-                        }
-
-                        result.push('\n');
+                    if let Some((sub_syllables, sub_start, _)) = syllable_info(sub) {
+                        append_line(&mut result, &sub_syllables, sub_start);
                     }
                 }
             }
@@ -81,13 +23,26 @@ pub fn generate(lyrics_data: &LyricsData) -> String {
     result
 }
 
-fn get_syllable_info(line: &LineInfo) -> Option<(Vec<SyllableInfo>, Option<i32>, Option<i32>)> {
-    match line {
-        LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } => {
-            let start_time = syllables.first().map(|s| s.start_time);
-            let end_time = syllables.last().map(|s| s.end_time);
-            Some((syllables.clone(), start_time, end_time))
-        }
-        _ => None,
+/// 追加一行 KRC 歌词：行头 `[开始时间,时长]` + 逐音节 `<相对开始时间,时长,0>文本`。
+fn append_line(result: &mut String, syllables: &[&SyllableInfo], start_time: Option<i32>) {
+    if let Some(start) = start_time {
+        let duration = syllables
+            .last()
+            .map(|last| last.end_time - start)
+            .unwrap_or(0);
+        let _ = write!(result, "[{},{}]", start, duration);
     }
+
+    for syllable in syllables {
+        let offset = syllable.start_time - start_time.unwrap_or(0);
+        let _ = write!(
+            result,
+            "<{},{},0>{}",
+            offset,
+            syllable.duration(),
+            syllable.text
+        );
+    }
+
+    result.push('\n');
 }

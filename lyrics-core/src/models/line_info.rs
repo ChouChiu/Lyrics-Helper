@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::lyrics_types::LyricsAlignment;
-use super::syllable_info::SyllableInfo;
+use super::syllable_info::SyllableItem;
 
 /// 歌词行信息，支持四种变体：简单行、音节行、完整行、完整音节行。
 ///
@@ -27,7 +27,7 @@ pub enum LineInfo {
     /// 音节歌词行，由多个音节组成，无直接文本。
     Syllable {
         /// 音节列表
-        syllables: Vec<SyllableInfo>,
+        syllables: Vec<SyllableItem>,
         /// 文本对齐方式
         alignment: LyricsAlignment,
         /// 子行（如背景和声）
@@ -53,7 +53,7 @@ pub enum LineInfo {
     /// 完整音节歌词行，在音节行基础上增加翻译和拼音信息。
     FullSyllable {
         /// 音节列表
-        syllables: Vec<SyllableInfo>,
+        syllables: Vec<SyllableItem>,
         /// 文本对齐方式
         alignment: LyricsAlignment,
         /// 子行（如背景和声）
@@ -100,7 +100,7 @@ impl LineInfo {
     }
 
     /// 创建音节歌词行。
-    pub fn new_syllable(syllables: Vec<SyllableInfo>) -> Self {
+    pub fn new_syllable(syllables: Vec<SyllableItem>) -> Self {
         Self::Syllable {
             syllables,
             alignment: LyricsAlignment::Unspecified,
@@ -129,7 +129,7 @@ impl LineInfo {
 
     /// 创建带翻译和拼音的完整音节歌词行。
     pub fn new_full_syllable(
-        syllables: Vec<SyllableInfo>,
+        syllables: Vec<SyllableItem>,
         translations: HashMap<String, String>,
         pronunciation: Option<String>,
     ) -> Self {
@@ -151,8 +151,8 @@ impl LineInfo {
     }
 
     /// 将音节列表拼接为完整文本字符串。
-    pub fn text_from_syllables(syllables: &[SyllableInfo]) -> String {
-        syllables.iter().map(|s| s.text.as_str()).collect()
+    pub fn text_from_syllables(syllables: &[SyllableItem]) -> String {
+        super::syllable_info::get_text_from_syllable_items(syllables)
     }
 
     /// 返回开始时间（毫秒）。音节行取第一个音节的开始时间。
@@ -160,7 +160,7 @@ impl LineInfo {
         match self {
             Self::Line { start_time, .. } | Self::FullLine { start_time, .. } => *start_time,
             Self::Syllable { syllables, .. } | Self::FullSyllable { syllables, .. } => {
-                syllables.first().map(|s| s.start_time)
+                syllables.first().map(|s| s.start_time())
             }
         }
     }
@@ -170,7 +170,7 @@ impl LineInfo {
         match self {
             Self::Line { end_time, .. } | Self::FullLine { end_time, .. } => *end_time,
             Self::Syllable { syllables, .. } | Self::FullSyllable { syllables, .. } => {
-                syllables.last().map(|s| s.end_time)
+                syllables.last().map(|s| s.end_time())
             }
         }
     }
@@ -223,6 +223,46 @@ impl LineInfo {
         }
     }
 
+    /// 取出子行，原位置留下 `None`。
+    pub fn take_sub_line(&mut self) -> Option<Box<LineInfo>> {
+        match self {
+            Self::Line { sub_line, .. }
+            | Self::Syllable { sub_line, .. }
+            | Self::FullLine { sub_line, .. }
+            | Self::FullSyllable { sub_line, .. } => sub_line.take(),
+        }
+    }
+
+    /// 返回拼音/注音（仅 Full 系列变体支持）。
+    pub fn pronunciation(&self) -> Option<&str> {
+        match self {
+            Self::FullLine { pronunciation, .. } | Self::FullSyllable { pronunciation, .. } => {
+                pronunciation.as_deref()
+            }
+            _ => None,
+        }
+    }
+
+    /// 返回音节列表的只读切片（非音节行返回 `None`）。
+    pub fn syllables(&self) -> Option<&[SyllableItem]> {
+        match self {
+            Self::Syllable { syllables, .. } | Self::FullSyllable { syllables, .. } => {
+                Some(syllables)
+            }
+            _ => None,
+        }
+    }
+
+    /// 返回音节列表的可变引用（非音节行返回 `None`）。
+    pub fn syllables_mut(&mut self) -> Option<&mut Vec<SyllableItem>> {
+        match self {
+            Self::Syllable { syllables, .. } | Self::FullSyllable { syllables, .. } => {
+                Some(syllables)
+            }
+            _ => None,
+        }
+    }
+
     /// 判断是否为音节行（`Syllable` 或 `FullSyllable`）。
     pub fn is_syllable(&self) -> bool {
         matches!(self, Self::Syllable { .. } | Self::FullSyllable { .. })
@@ -249,7 +289,10 @@ impl LineInfo {
 
     /// 返回包含子行在内的总持续时长（毫秒）。
     pub fn duration_with_sub_line(&self) -> Option<i32> {
-        match (self.start_time_with_sub_line(), self.end_time_with_sub_line()) {
+        match (
+            self.start_time_with_sub_line(),
+            self.end_time_with_sub_line(),
+        ) {
             (Some(s), Some(e)) => Some(e - s),
             _ => None,
         }
@@ -262,7 +305,9 @@ impl LineInfo {
         match self {
             Self::Line { text, sub_line, .. } | Self::FullLine { text, sub_line, .. } => {
                 if let Some(sub) = sub_line {
-                    let sub_text = crate::helpers::string_helper::remove_front_back_brackets(&sub.text_from_any());
+                    let sub_text = crate::helpers::string_helper::remove_front_back_brackets(
+                        &sub.text_from_any(),
+                    );
                     match (sub.start_time(), self.start_time()) {
                         (Some(sub_t), Some(main_t)) if sub_t < main_t => {
                             format!("({}) {}", sub_text, text.trim())
@@ -275,11 +320,21 @@ impl LineInfo {
                     text.clone()
                 }
             }
-            Self::Syllable { syllables, sub_line, .. }
-            | Self::FullSyllable { syllables, sub_line, .. } => {
+            Self::Syllable {
+                syllables,
+                sub_line,
+                ..
+            }
+            | Self::FullSyllable {
+                syllables,
+                sub_line,
+                ..
+            } => {
                 let text = Self::text_from_syllables(syllables);
                 if let Some(sub) = sub_line {
-                    let sub_text = crate::helpers::string_helper::remove_front_back_brackets(&sub.text_from_any());
+                    let sub_text = crate::helpers::string_helper::remove_front_back_brackets(
+                        &sub.text_from_any(),
+                    );
                     match (sub.start_time(), self.start_time()) {
                         (Some(sub_t), Some(main_t)) if sub_t < main_t => {
                             format!("({}) {}", sub_text, text.trim())
@@ -347,24 +402,60 @@ impl LineInfo {
     /// 将 `Line` 转换为 `FullLine`，或 `Syllable` 转换为 `FullSyllable`。
     ///
     /// 已是 Full 系列或其他变体则原样返回。
-    pub fn to_full_line(self, translations: HashMap<String, String>, pronunciation: Option<String>) -> Self {
+    pub fn to_full_line(
+        self,
+        translations: HashMap<String, String>,
+        pronunciation: Option<String>,
+    ) -> Self {
         match self {
-            Self::Line { text, start_time, end_time, alignment, sub_line } => {
-                Self::FullLine { text, start_time, end_time, alignment, sub_line, translations, pronunciation }
-            }
-            Self::Syllable { syllables, alignment, sub_line } => {
-                Self::FullSyllable { syllables, alignment, sub_line, translations, pronunciation }
-            }
+            Self::Line {
+                text,
+                start_time,
+                end_time,
+                alignment,
+                sub_line,
+            } => Self::FullLine {
+                text,
+                start_time,
+                end_time,
+                alignment,
+                sub_line,
+                translations,
+                pronunciation,
+            },
+            Self::Syllable {
+                syllables,
+                alignment,
+                sub_line,
+            } => Self::FullSyllable {
+                syllables,
+                alignment,
+                sub_line,
+                translations,
+                pronunciation,
+            },
             other => other,
         }
     }
 
     /// 将 `Syllable` 转换为 `FullSyllable`，其他变体原样返回。
-    pub fn to_full_syllable(self, translations: HashMap<String, String>, pronunciation: Option<String>) -> Self {
+    pub fn to_full_syllable(
+        self,
+        translations: HashMap<String, String>,
+        pronunciation: Option<String>,
+    ) -> Self {
         match self {
-            Self::Syllable { syllables, alignment, sub_line } => {
-                Self::FullSyllable { syllables, alignment, sub_line, translations, pronunciation }
-            }
+            Self::Syllable {
+                syllables,
+                alignment,
+                sub_line,
+            } => Self::FullSyllable {
+                syllables,
+                alignment,
+                sub_line,
+                translations,
+                pronunciation,
+            },
             other => other,
         }
     }

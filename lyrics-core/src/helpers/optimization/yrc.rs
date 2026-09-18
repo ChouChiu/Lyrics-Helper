@@ -1,37 +1,70 @@
-use crate::models::LineInfo;
+use crate::models::{LineInfo, SyllableItem};
 
-/// 标准化 YRC 格式歌词：移除末尾空格，将标点符号合并到前一个音节。
+/// 针对 YRC 歌词格式的优化。
+///
+/// 移除末尾空格与空音节，把独立的空格与标点合并到前一个音节。
 pub fn standardize_yrc_lyrics(lines: &mut [LineInfo]) {
     for line in lines.iter_mut() {
-        if let LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } = line {
-            // 移除末尾空格
-            if let Some(last) = syllables.last_mut() {
-                if last.text.ends_with(' ') {
-                    last.text = last.text.trim_end().to_string();
-                }
-            }
-
-            // 将标点符号合并到前一个音节
-            let mut i = 1;
-            while i < syllables.len() {
-                if syllables[i].text.len() == 1 && is_punctuation(syllables[i].text.chars().next().unwrap()) {
-                    let punct = syllables[i].text.clone();
-                    let end_time = syllables[i].end_time;
-                    syllables[i - 1].text.push_str(&punct);
-                    syllables[i - 1].end_time = end_time;
-                    syllables.remove(i);
-                } else {
-                    i += 1;
-                }
-            }
-        }
+        standardize_yrc_lyrics_line(line);
     }
 }
 
-fn is_punctuation(c: char) -> bool {
-    matches!(c,
-        '.' | ',' | '!' | '?' | ';' | ':' | '-' | '(' | ')' |
-        '。' | '，' | '！' | '？' | '；' | '：' | '—' | '（' | '）' |
-        '\'' | '"' | '…' | '、' | '～' | '~'
-    )
+/// 针对单行 YRC 歌词的优化。
+///
+/// 上游实现按 `SyllableInfo` 处理音节，合并后的音节（`FullSyllableInfo`）会抛出异常；
+/// 本实现改为把文本追加到合并音节的最后一个子音节，行为保持等价且不会失败。
+pub fn standardize_yrc_lyrics_line(line: &mut LineInfo) {
+    let Some(syllables) = line.syllables_mut() else {
+        return;
+    };
+
+    // 移除最后的空格
+    while syllables.last().is_some_and(|item| item.text() == " ") {
+        syllables.pop();
+    }
+
+    let mut i = 0;
+    while i < syllables.len() {
+        let text = syllables[i].text();
+
+        // 移除空白格
+        if text.is_empty() {
+            syllables.remove(i);
+            continue;
+        }
+
+        // 合并单独的空格
+        if text == " " {
+            if i > 0 {
+                append_text(&mut syllables[i - 1], &text);
+            }
+            syllables.remove(i);
+            continue;
+        }
+
+        // 合并标点符号
+        if i > 0
+            && text.chars().count() <= 2
+            && matches!(text.chars().next(), Some(',' | '.' | '?' | '!' | '"'))
+        {
+            append_text(&mut syllables[i - 1], &text);
+            syllables.remove(i);
+            continue;
+        }
+
+        i += 1;
+    }
+}
+
+/// 把文本追加到音节（合并音节追加到其最后一个子音节）。
+fn append_text(item: &mut SyllableItem, text: &str) {
+    match item {
+        SyllableItem::Syllable(syllable) => syllable.text.push_str(text),
+        SyllableItem::Full(full) => {
+            if let Some(last) = full.sub_items_mut().last_mut() {
+                last.text.push_str(text);
+            }
+            full.refresh_properties();
+        }
+    }
 }

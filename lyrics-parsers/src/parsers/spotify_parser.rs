@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use lyrics_core::models::*;
+use serde::Deserialize;
 
 /// Spotify Color Lyrics JSON 的顶层结构。
 #[derive(Debug, Deserialize)]
@@ -113,16 +113,25 @@ fn parse_synced_lyrics(lyrics: &[SpotifyLyricsLine]) -> Vec<LineInfo> {
                     let chars_count: usize = syllable.chars_count.parse().unwrap_or(0);
                     let start_time: i32 = syllable.start_time_ms.parse().unwrap_or(0);
                     let end_time: i32 = syllable.end_time_ms.parse().unwrap_or(0);
-                    let text = line.words.chars().skip(char_idx).take(chars_count).collect();
+                    let text = line
+                        .words
+                        .chars()
+                        .skip(char_idx)
+                        .take(chars_count)
+                        .collect();
                     syllable_list.push(SyllableInfo::new(text, start_time, end_time));
                     char_idx += chars_count;
                 }
-                list.push(LineInfo::new_syllable(syllable_list));
+                list.push(LineInfo::new_syllable(to_syllable_items(syllable_list)));
             } else {
                 let start_time: i32 = line.start_time_ms.parse().unwrap_or(0);
                 let end_time: i32 = line.end_time_ms.parse().unwrap_or(0);
                 if end_time != 0 {
-                    list.push(LineInfo::new_line(line.words.clone(), Some(start_time), Some(end_time)));
+                    list.push(LineInfo::new_line(
+                        line.words.clone(),
+                        Some(start_time),
+                        Some(end_time),
+                    ));
                 } else {
                     list.push(LineInfo::new_line_with_time(line.words.clone(), start_time));
                 }
@@ -131,7 +140,11 @@ fn parse_synced_lyrics(lyrics: &[SpotifyLyricsLine]) -> Vec<LineInfo> {
             let start_time: i32 = line.start_time_ms.parse().unwrap_or(0);
             let end_time: i32 = line.end_time_ms.parse().unwrap_or(0);
             if end_time != 0 {
-                list.push(LineInfo::new_line(line.words.clone(), Some(start_time), Some(end_time)));
+                list.push(LineInfo::new_line(
+                    line.words.clone(),
+                    Some(start_time),
+                    Some(end_time),
+                ));
             } else {
                 list.push(LineInfo::new_line_with_time(line.words.clone(), start_time));
             }

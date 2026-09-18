@@ -1,7 +1,7 @@
+use crate::parsers::lrc_parser;
+use lyrics_core::models::*;
 use serde::Deserialize;
 use serde_json::Value;
-use lyrics_core::models::*;
-use crate::parsers::lrc_parser;
 
 /// Musixmatch 逐音节同步（richsync）的单行数据。
 #[derive(Debug, Deserialize)]
@@ -74,7 +74,7 @@ pub fn parse_inner(raw_json: &str, ignore_syllable: bool) -> Option<LyricsData> 
                                 end_time,
                             ));
                         }
-                        lines.push(LineInfo::new_syllable(syllables));
+                        lines.push(LineInfo::new_syllable(to_syllable_items(syllables)));
                     }
 
                     let language = track_get

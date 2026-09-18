@@ -1,4 +1,6 @@
+use crate::syllable_info;
 use lyrics_core::models::*;
+use std::fmt::Write;
 
 /// 将歌词数据生成为 Lyricify Syllable 逐字歌词格式字符串。
 pub fn generate(lyrics_data: &LyricsData) -> String {
@@ -8,16 +10,17 @@ pub fn generate(lyrics_data: &LyricsData) -> String {
         for line in lines {
             let alignment_code = get_alignment_code(line);
 
-            if let Some((syllables, _, _)) = get_syllable_info(line) {
-                result.push_str(&format!("[{}]", alignment_code));
+            if let Some((syllables, _, _)) = syllable_info(line) {
+                let _ = write!(result, "[{}]", alignment_code);
 
                 for syllable in syllables {
-                    result.push_str(&format!(
+                    let _ = write!(
+                        result,
                         "{}({},{})",
                         syllable.text,
                         syllable.start_time,
                         syllable.duration()
-                    ));
+                    );
                 }
 
                 result.push('\n');
@@ -25,16 +28,17 @@ pub fn generate(lyrics_data: &LyricsData) -> String {
                 // Sub line
                 if let Some(sub) = line.sub_line() {
                     let sub_alignment = get_alignment_code(sub) + 3; // Background vocals offset
-                    if let Some((sub_syllables, _, _)) = get_syllable_info(sub) {
-                        result.push_str(&format!("[{}]", sub_alignment));
+                    if let Some((sub_syllables, _, _)) = syllable_info(sub) {
+                        let _ = write!(result, "[{}]", sub_alignment);
 
                         for syllable in sub_syllables {
-                            result.push_str(&format!(
+                            let _ = write!(
+                                result,
                                 "{}({},{})",
                                 syllable.text,
                                 syllable.start_time,
                                 syllable.duration()
-                            ));
+                            );
                         }
 
                         result.push('\n');
@@ -52,16 +56,5 @@ fn get_alignment_code(line: &LineInfo) -> i32 {
         LyricsAlignment::Unspecified => 3,
         LyricsAlignment::Left => 4,
         LyricsAlignment::Right => 5,
-    }
-}
-
-fn get_syllable_info(line: &LineInfo) -> Option<(Vec<SyllableInfo>, Option<i32>, Option<i32>)> {
-    match line {
-        LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } => {
-            let start_time = syllables.first().map(|s| s.start_time);
-            let end_time = syllables.last().map(|s| s.end_time);
-            Some((syllables.clone(), start_time, end_time))
-        }
-        _ => None,
     }
 }

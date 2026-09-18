@@ -44,7 +44,11 @@ pub fn parse_general_attributes_to_lyrics_data_from_lines(
                 }
             } else {
                 if let Some(ref mut file) = data.file {
-                    if let Some(attrs) = file.additional_info.as_mut().and_then(|ai| ai.attributes_mut()) {
+                    if let Some(attrs) = file
+                        .additional_info
+                        .as_mut()
+                        .and_then(|ai| ai.attributes_mut())
+                    {
                         attrs.push((key, value));
                     }
                 }
@@ -76,7 +80,11 @@ pub fn parse_general_attributes_to_lyrics_data(
     let chars: Vec<char> = input.chars().collect();
     while index < chars.len() {
         if chars[index] == '[' {
-            let end_index = input[index..].find('\n').map(|i| i + index).unwrap_or(chars.len());
+            let end_index = chars[index..]
+                .iter()
+                .position(|&c| c == '\n')
+                .map(|i| i + index)
+                .unwrap_or(chars.len());
             let info_line: String = chars[index..end_index].iter().collect();
 
             if is_attribute_line(&info_line) {
@@ -101,7 +109,11 @@ pub fn parse_general_attributes_to_lyrics_data(
                 }
 
                 if let Some(ref mut file) = data.file {
-                    if let Some(attrs) = file.additional_info.as_mut().and_then(|ai| ai.attributes_mut()) {
+                    if let Some(attrs) = file
+                        .additional_info
+                        .as_mut()
+                        .and_then(|ai| ai.attributes_mut())
+                    {
                         attrs.push((key, value));
                     }
                 }

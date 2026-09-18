@@ -11,6 +11,20 @@ pub mod lyricify_lines_generator;
 
 use lyrics_core::models::*;
 
+/// 取出音节行的音节序列（合并音节已展开）与首尾时间，非音节行返回 `None`。
+///
+/// 返回借用的音节引用，避免生成时深拷贝整行音节。
+pub(crate) fn syllable_info(
+    line: &LineInfo,
+) -> Option<(Vec<&SyllableInfo>, Option<i32>, Option<i32>)> {
+    let syllables = line.syllables()?;
+    Some((
+        syllables.iter().flat_map(SyllableItem::parts).collect(),
+        syllables.first().map(SyllableItem::start_time),
+        syllables.last().map(SyllableItem::end_time),
+    ))
+}
+
 /// 子歌词行的输出方式。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SubLinesOutputType {

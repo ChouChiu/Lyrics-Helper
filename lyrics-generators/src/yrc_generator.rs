@@ -1,4 +1,6 @@
+use crate::syllable_info;
 use lyrics_core::models::*;
+use std::fmt::Write;
 
 /// 将歌词数据生成为 YRC（网易云）逐字歌词格式字符串。
 pub fn generate(lyrics_data: &LyricsData) -> String {
@@ -6,45 +8,39 @@ pub fn generate(lyrics_data: &LyricsData) -> String {
 
     if let Some(ref lines) = lyrics_data.lines {
         for line in lines {
-            if let Some((syllables, start_time, end_time)) = get_syllable_info(line) {
+            if let Some((syllables, start_time, end_time)) = syllable_info(line) {
                 if let (Some(st), Some(et)) = (start_time, end_time) {
                     let duration = et - st;
-                    result.push_str(&format!(
-                        "[{},{}]",
-                        st,
-                        duration
-                    ));
+                    let _ = write!(result, "[{},{}]", st, duration);
                 }
 
                 for syllable in syllables {
-                    result.push_str(&format!(
+                    let _ = write!(
+                        result,
                         "({},{},0){}",
                         syllable.start_time,
                         syllable.duration(),
                         syllable.text
-                    ));
+                    );
                 }
 
                 result.push('\n');
 
                 if let Some(sub) = line.sub_line() {
-                    if let Some((sub_syllables, sub_start, sub_end)) = get_syllable_info(sub) {
+                    if let Some((sub_syllables, sub_start, sub_end)) = syllable_info(sub) {
                         if let (Some(st), Some(et)) = (sub_start, sub_end) {
                             let duration = et - st;
-                            result.push_str(&format!(
-                                "[{},{}]",
-                                st,
-                                duration
-                            ));
+                            let _ = write!(result, "[{},{}]", st, duration);
                         }
 
                         for syllable in sub_syllables {
-                            result.push_str(&format!(
+                            let _ = write!(
+                                result,
                                 "({},{},0){}",
                                 syllable.start_time,
                                 syllable.duration(),
                                 syllable.text
-                            ));
+                            );
                         }
 
                         result.push('\n');
@@ -55,15 +51,4 @@ pub fn generate(lyrics_data: &LyricsData) -> String {
     }
 
     result
-}
-
-fn get_syllable_info(line: &LineInfo) -> Option<(Vec<SyllableInfo>, Option<i32>, Option<i32>)> {
-    match line {
-        LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } => {
-            let start_time = syllables.first().map(|s| s.start_time);
-            let end_time = syllables.last().map(|s| s.end_time);
-            Some((syllables.clone(), start_time, end_time))
-        }
-        _ => None,
-    }
 }

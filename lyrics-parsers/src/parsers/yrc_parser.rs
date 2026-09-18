@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use lyrics_core::models::*;
+use serde::Deserialize;
 
 /// YRC 信息行（如作词/作曲）的 JSON 结构。
 #[derive(Debug, Deserialize)]
@@ -56,7 +56,11 @@ pub fn parse(input: &str) -> LyricsData {
     let mut i = 0;
     while i < chars.len() {
         if chars[i] == '{' {
-            let end_index = input[i..].find('\n').map(|idx| idx + i).unwrap_or(chars.len());
+            let end_index = chars[i..]
+                .iter()
+                .position(|&c| c == '\n')
+                .map(|idx| idx + i)
+                .unwrap_or(chars.len());
             let json_line: String = chars[i..end_index].iter().collect();
             if let Ok(credits) = serde_json::from_str::<CreditsInfo>(&json_line) {
                 let text: String = credits.credits.iter().map(|c| c.text.as_str()).collect();
@@ -94,7 +98,7 @@ pub fn parse(input: &str) -> LyricsData {
     while j >= 0 {
         if chars[j as usize] == '}' {
             let start_index = {
-                let pos = input[..j as usize + 1].rfind('\n');
+                let pos = chars[..=j as usize].iter().rposition(|&c| c == '\n');
                 match pos {
                     Some(p) => p + 1,
                     None => 0,
@@ -151,7 +155,11 @@ pub fn parse_lyrics(input: &str) -> Vec<LineInfo> {
     let mut i = 0;
     while i < chars.len() {
         if chars[i] == '{' {
-            let end_index = input[i..].find('\n').map(|idx| idx + i).unwrap_or(chars.len());
+            let end_index = chars[i..]
+                .iter()
+                .position(|&c| c == '\n')
+                .map(|idx| idx + i)
+                .unwrap_or(chars.len());
             let json_line: String = chars[i..end_index].iter().collect();
             if let Ok(credits) = serde_json::from_str::<CreditsInfo>(&json_line) {
                 let text: String = credits.credits.iter().map(|c| c.text.as_str()).collect();
@@ -172,7 +180,7 @@ pub fn parse_lyrics(input: &str) -> Vec<LineInfo> {
     while j >= 0 {
         if chars[j as usize] == '}' {
             let start_index = {
-                let pos = input[..j as usize + 1].rfind('\n');
+                let pos = chars[..=j as usize].iter().rposition(|&c| c == '\n');
                 match pos {
                     Some(p) => p + 1,
                     None => 0,
@@ -226,8 +234,9 @@ pub fn parse_only_lyrics(input: &str) -> Vec<LineInfo> {
                     word_timespan,
                     word_timespan + word_duration,
                 ));
-                lines.push(LineInfo::new_syllable(karaoke_word_infos.clone()));
-                karaoke_word_infos.clear();
+                lines.push(LineInfo::new_syllable(to_syllable_items(std::mem::take(
+                    &mut karaoke_word_infos,
+                ))));
                 lyric_string_builder.clear();
                 state = CurrentState::None;
                 i += 1;
@@ -337,37 +346,53 @@ pub fn parse_only_lyrics(input: &str) -> Vec<LineInfo> {
                 if cur_char.is_numeric() {
                     state = CurrentState::LyricTimestamp;
                 }
-                time_span_builder = time_span_builder.wrapping_mul(10).wrapping_add(cur_char as i32 - '0' as i32);
+                time_span_builder = time_span_builder
+                    .wrapping_mul(10)
+                    .wrapping_add(cur_char as i32 - '0' as i32);
             }
             CurrentState::LyricTimestamp => {
-                time_span_builder = time_span_builder.wrapping_mul(10).wrapping_add(cur_char as i32 - '0' as i32);
+                time_span_builder = time_span_builder
+                    .wrapping_mul(10)
+                    .wrapping_add(cur_char as i32 - '0' as i32);
             }
             CurrentState::PossiblyWordTimestamp => {
                 if cur_char.is_numeric() {
                     state = CurrentState::WordTimestamp;
                 }
-                time_span_builder = time_span_builder.wrapping_mul(10).wrapping_add(cur_char as i32 - '0' as i32);
+                time_span_builder = time_span_builder
+                    .wrapping_mul(10)
+                    .wrapping_add(cur_char as i32 - '0' as i32);
             }
             CurrentState::WordTimestamp => {
-                time_span_builder = time_span_builder.wrapping_mul(10).wrapping_add(cur_char as i32 - '0' as i32);
+                time_span_builder = time_span_builder
+                    .wrapping_mul(10)
+                    .wrapping_add(cur_char as i32 - '0' as i32);
             }
             CurrentState::PossiblyLyricDuration => {
                 if cur_char.is_numeric() {
                     state = CurrentState::LyricDuration;
                 }
-                time_span_builder = time_span_builder.wrapping_mul(10).wrapping_add(cur_char as i32 - '0' as i32);
+                time_span_builder = time_span_builder
+                    .wrapping_mul(10)
+                    .wrapping_add(cur_char as i32 - '0' as i32);
             }
             CurrentState::LyricDuration => {
-                time_span_builder = time_span_builder.wrapping_mul(10).wrapping_add(cur_char as i32 - '0' as i32);
+                time_span_builder = time_span_builder
+                    .wrapping_mul(10)
+                    .wrapping_add(cur_char as i32 - '0' as i32);
             }
             CurrentState::PossiblyWordDuration => {
                 if cur_char.is_numeric() {
                     state = CurrentState::WordDuration;
                 }
-                time_span_builder = time_span_builder.wrapping_mul(10).wrapping_add(cur_char as i32 - '0' as i32);
+                time_span_builder = time_span_builder
+                    .wrapping_mul(10)
+                    .wrapping_add(cur_char as i32 - '0' as i32);
             }
             CurrentState::WordDuration => {
-                time_span_builder = time_span_builder.wrapping_mul(10).wrapping_add(cur_char as i32 - '0' as i32);
+                time_span_builder = time_span_builder
+                    .wrapping_mul(10)
+                    .wrapping_add(cur_char as i32 - '0' as i32);
             }
             CurrentState::Lyric => {
                 if reaches_end && (cur_char == '\n' || cur_char == '\r') {
@@ -385,8 +410,9 @@ pub fn parse_only_lyrics(input: &str) -> Vec<LineInfo> {
                 word_timespan,
                 word_timespan + word_duration,
             ));
-            lines.push(LineInfo::new_syllable(karaoke_word_infos.clone()));
-            karaoke_word_infos.clear();
+            lines.push(LineInfo::new_syllable(to_syllable_items(std::mem::take(
+                &mut karaoke_word_infos,
+            ))));
             lyric_string_builder.clear();
         }
 
