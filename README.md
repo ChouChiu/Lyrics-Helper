@@ -8,7 +8,7 @@ Rust 歌词工具库，支持解析、生成、解密、搜索多种歌词格式
 
 ```toml
 [dependencies]
-lyrics-helper = "0.2.0"
+lyrics-helper = "0.3.0"
 ```
 
 自动检测格式并解析歌词：
@@ -140,7 +140,7 @@ let (lrc, translation) = netease::api::get_lyrics(423997333).await.unwrap();
 搜索功能需要启用 `search` feature（默认启用），依赖 `reqwest` 和 `tokio`。如需纯离线解析库，禁用默认 features：
 
 ```toml
-lyrics-helper = { version = "0.2.0", default-features = false }
+lyrics-helper = { version = "0.3.0", default-features = false }
 ```
 
 ## 项目架构

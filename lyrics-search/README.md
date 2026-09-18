@@ -17,7 +17,7 @@
 
 ```toml
 [dependencies]
-lyrics-search = "0.2"
+lyrics-search = "0.3"
 ```
 
 需要启用 `search` feature（默认启用），依赖 `reqwest` 和 `tokio`。

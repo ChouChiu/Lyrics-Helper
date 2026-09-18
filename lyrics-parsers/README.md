@@ -19,7 +19,7 @@
 
 ```toml
 [dependencies]
-lyrics-parsers = "0.2"
+lyrics-parsers = "0.3"
 ```
 
 ## 使用
