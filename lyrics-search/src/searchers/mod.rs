@@ -37,6 +37,19 @@ pub enum Searchers {
 }
 
 /// 比较目标曲目元数据与搜索结果的匹配程度，返回匹配等级。
+/// 曲名权重。
+const WEIGHT_TITLE: f64 = 1.0;
+/// 歌手权重。
+const WEIGHT_ARTIST: f64 = 1.0;
+/// 专辑名权重。
+const WEIGHT_ALBUM: f64 = 0.4;
+/// 专辑歌手权重。
+const WEIGHT_ALBUM_ARTIST: f64 = 0.2;
+/// 时长权重。
+const WEIGHT_DURATION: f64 = 1.0;
+/// 单个字段的满分，与 `compare_helper` 中各 `score()` 的 `Perfect` 取值一致。
+const FIELD_MAX_SCORE: f64 = 7.0;
+
 pub fn compare_track(
     track: &TrackMetadata,
     result_title: Option<&str>,
@@ -46,10 +59,7 @@ pub fn compare_track(
     result_duration_ms: Option<i32>,
 ) -> MatchType {
     let track_match = compare_name(track.title.as_deref(), result_title);
-    let artist_match = compare_artist(
-        track.artists.as_deref().unwrap_or(&[]),
-        result_artists,
-    );
+    let artist_match = compare_artist(track.artists.as_deref().unwrap_or(&[]), result_artists);
     let album_match = compare_name(track.album.as_deref(), result_album);
     let album_artist_match = compare_artist(
         track.album_artists.as_deref().unwrap_or(&[]),
@@ -58,26 +68,27 @@ pub fn compare_track(
     let duration_match = compare_duration(track.duration_ms, result_duration_ms);
 
     let mut total_score = 0.0f64;
-    total_score += name_score(track_match);
-    total_score += artist_score(artist_match);
-    total_score += name_score(album_match) * 0.4;
-    total_score += artist_score(album_artist_match) * 0.2;
-    total_score += duration_score(duration_match);
+    total_score += name_score(track_match) * WEIGHT_TITLE;
+    total_score += artist_score(artist_match) * WEIGHT_ARTIST;
+    total_score += name_score(album_match) * WEIGHT_ALBUM;
+    total_score += artist_score(album_artist_match) * WEIGHT_ALBUM_ARTIST;
+    total_score += duration_score(duration_match) * WEIGHT_DURATION;
 
-    let mut null_count = 0.0f64;
-    if album_match.is_none() {
-        null_count += 0.4;
+    // 缺失的可选信息不参与评分，按可比较的字段重新分配权重
+    let full_score =
+        (WEIGHT_TITLE + WEIGHT_ARTIST + WEIGHT_ALBUM + WEIGHT_ALBUM_ARTIST + WEIGHT_DURATION)
+            * FIELD_MAX_SCORE;
+    let mut available_score = (WEIGHT_TITLE + WEIGHT_ARTIST) * FIELD_MAX_SCORE;
+    if album_match.is_some() {
+        available_score += WEIGHT_ALBUM * FIELD_MAX_SCORE;
     }
-    if album_artist_match.is_none() {
-        null_count += 0.2;
+    if album_artist_match.is_some() {
+        available_score += WEIGHT_ALBUM_ARTIST * FIELD_MAX_SCORE;
     }
-    if duration_match.is_none() {
-        null_count += 1.0;
+    if duration_match.is_some() {
+        available_score += WEIGHT_DURATION * FIELD_MAX_SCORE;
     }
-    let full_score = 30.0f64;
-    if null_count > 0.0 {
-        total_score = total_score * full_score / (full_score - null_count * 7.0);
-    }
+    total_score *= full_score / available_score;
 
     if total_score > 21.0 {
         MatchType::Perfect

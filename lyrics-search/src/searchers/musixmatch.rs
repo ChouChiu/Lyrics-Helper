@@ -1,13 +1,35 @@
 use async_trait::async_trait;
 
+use lyrics_core::models::TrackMetadata;
+
 use crate::providers::web::musixmatch::api;
-use super::compare_helper::MatchType;
+use crate::providers::web::musixmatch::response::Track;
+
+use super::Searchers;
+use super::compare_track_result;
 use super::search_result::SearchResult;
 use super::searcher::Searcher;
-use super::Searchers;
 
 /// Musixmatch 歌词搜索器。
 pub struct MusixmatchSearcher;
+
+impl MusixmatchSearcher {
+    /// 使用关键字搜索，并在提供曲目信息时按匹配度降序重排。
+    pub async fn search_for_results_async(
+        keyword: Option<&str>,
+        track: Option<&str>,
+        artist: Option<&str>,
+        duration_ms: Option<i32>,
+    ) -> Vec<SearchResult> {
+        let duration_secs = duration_ms.filter(|d| *d > 0).map(|d| d / 1000);
+        let tracks = api::search_tracks(keyword, track, artist, duration_secs)
+            .await
+            .unwrap_or_default();
+
+        let results = tracks.iter().map(to_search_result).collect();
+        rank_results(results, track, artist, duration_ms)
+    }
+}
 
 #[async_trait]
 impl Searcher for MusixmatchSearcher {
@@ -24,68 +46,103 @@ impl Searcher for MusixmatchSearcher {
     }
 
     async fn search_for_results_str(&self, search_string: &str) -> Option<Vec<SearchResult>> {
-        let token = api::get_token().await?;
+        let results = Self::search_for_results_async(Some(search_string), None, None, None).await;
+        if results.is_empty() {
+            return None;
+        }
 
-        let (q_track, q_artist) = parse_search_string(search_string);
-
-        let resp = api::search_track(&q_track, &q_artist, &token).await?;
-        let message = resp.message?;
-        let confidence = message.header.confidence;
-        let track = message.body?.track?;
-
-        let match_type = match confidence as i32 {
-            1000 => MatchType::Perfect,
-            950..=999 => MatchType::VeryHigh,
-            900..=949 => MatchType::High,
-            750..=899 => MatchType::PrettyHigh,
-            600..=749 => MatchType::Medium,
-            400..=599 => MatchType::Low,
-            200..=399 => MatchType::VeryLow,
-            _ => MatchType::NoMatch,
-        };
-
-        let artists: Vec<String> = track
-            .artist_name
-            .split(" feat. ")
-            .flat_map(|s| s.split(" & "))
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        let result = SearchResult {
-            searcher_type: Searchers::Musixmatch,
-            title: track.track_name,
-            artists,
-            album: track.album_name.unwrap_or_default(),
-            album_artists: None,
-            duration_ms: Some(track.track_length * 1000),
-            match_type: Some(match_type),
-            id: track.track_id.to_string(),
-            numeric_id: None,
-        };
-
-        Some(vec![result])
+        Some(results)
     }
 }
 
-fn parse_search_string(search_string: &str) -> (String, String) {
-    if let Some(idx) = search_string.find(" - ") {
-        let artist = search_string[..idx].trim().to_string();
-        let track = search_string[idx + 3..].trim().to_string();
-        if !artist.is_empty() && !track.is_empty() {
-            return (track, artist);
+/// 将 Musixmatch 曲目映射为搜索结果。
+fn to_search_result(track: &Track) -> SearchResult {
+    let artists: Vec<String> = track
+        .artist_name
+        .split(" feat. ")
+        .flat_map(|s| s.split(" & "))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    SearchResult {
+        searcher_type: Searchers::Musixmatch,
+        title: track.track_name.clone(),
+        artists,
+        album: track.album_name.clone().unwrap_or_default(),
+        album_artists: None,
+        duration_ms: Some(track.track_length * 1000),
+        match_type: None,
+        id: track.track_id.to_string(),
+        numeric_id: None,
+    }
+}
+
+/// 提供曲目信息时写入匹配等级并按匹配度降序排序。
+fn rank_results(
+    mut results: Vec<SearchResult>,
+    track: Option<&str>,
+    artist: Option<&str>,
+    duration_ms: Option<i32>,
+) -> Vec<SearchResult> {
+    if track.is_none_or(|t| t.trim().is_empty()) {
+        return results;
+    }
+
+    let metadata = TrackMetadata {
+        title: track.map(str::to_string),
+        artist: artist.map(str::to_string),
+        artists: artist.map(|a| a.split(", ").map(str::to_string).collect()),
+        duration_ms,
+        ..Default::default()
+    };
+    for result in &mut results {
+        result.match_type = Some(compare_track_result(&metadata, result));
+    }
+    results
+        .sort_by_key(|result| std::cmp::Reverse(result.match_type.map(|m| m as i32).unwrap_or(-1)));
+    results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::searchers::compare_helper::MatchType;
+
+    fn result(title: &str, artist: &str) -> SearchResult {
+        SearchResult {
+            searcher_type: Searchers::Musixmatch,
+            title: title.to_string(),
+            artists: vec![artist.to_string()],
+            album: String::new(),
+            album_artists: None,
+            duration_ms: None,
+            match_type: None,
+            id: String::new(),
+            numeric_id: None,
         }
     }
 
-    let parts: Vec<&str> = search_string.split_whitespace().collect();
-    match parts.len() {
-        0 => (String::new(), String::new()),
-        1 => (parts[0].to_string(), String::new()),
-        _ => {
-            let last = parts.len() - 1;
-            let track = parts[..last].join(" ");
-            let artist = parts[last].to_string();
-            (track, artist)
-        }
+    #[test]
+    fn test_rank_results_sorts_by_match_type() {
+        let results = vec![result("Unrelated", "Nobody"), result("Hello", "Adele")];
+
+        let ranked = rank_results(results, Some("Hello"), Some("Adele"), None);
+
+        assert_eq!(ranked[0].title, "Hello");
+        assert_eq!(ranked[0].match_type, Some(MatchType::Perfect));
+        assert_eq!(ranked[1].title, "Unrelated");
+        assert_eq!(ranked[1].match_type, Some(MatchType::NoMatch));
+    }
+
+    #[test]
+    fn test_rank_results_without_track_keeps_order() {
+        let results = vec![result("Unrelated", "Nobody"), result("Hello", "Adele")];
+
+        let ranked = rank_results(results, Some("  "), Some("Adele"), None);
+
+        assert_eq!(ranked[0].title, "Unrelated");
+        assert_eq!(ranked[1].title, "Hello");
+        assert!(ranked.iter().all(|r| r.match_type.is_none()));
     }
 }

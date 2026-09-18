@@ -162,18 +162,20 @@ pub fn compare_duration(d1: Option<i32>, d2: Option<i32>) -> Option<DurationMatc
 
 /// 比较两组艺术家列表的匹配程度，支持繁简中文转换。
 pub fn compare_artist(artist1: &[String], artist2: &[String]) -> Option<ArtistMatchType> {
-    if artist1.is_empty() || artist2.is_empty() {
-        return None;
-    }
-
     let list1: Vec<String> = artist1
         .iter()
+        .filter(|a| !a.trim().is_empty())
         .map(|a| to_simplified(&a.to_lowercase()))
         .collect();
     let list2: Vec<String> = artist2
         .iter()
+        .filter(|a| !a.trim().is_empty())
         .map(|a| to_simplified(&a.to_lowercase()))
         .collect();
+
+    if list1.is_empty() || list2.is_empty() {
+        return None;
+    }
 
     let count = list2.iter().filter(|a| list1.contains(a)).count();
 
@@ -191,9 +193,7 @@ pub fn compare_artist(artist1: &[String], artist2: &[String]) -> Option<ArtistMa
         return Some(ArtistMatchType::High);
     }
 
-    if list1.len() > 5
-        && (list2[0].contains("Various") || list2[0].contains("群星"))
-    {
+    if list1.len() > 5 && (list2[0].contains("Various") || list2[0].contains("群星")) {
         return Some(ArtistMatchType::VeryHigh);
     }
 
@@ -205,11 +205,19 @@ pub fn compare_artist(artist1: &[String], artist2: &[String]) -> Option<ArtistMa
         return Some(ArtistMatchType::High);
     }
 
-    if list1.len() == 1 && list2.len() > 1 && list2[0].chars().count() > 3 && list1[0].contains(list2[0].as_str()) {
+    if list1.len() == 1
+        && list2.len() > 1
+        && list2[0].chars().count() > 3
+        && list1[0].contains(list2[0].as_str())
+    {
         return Some(ArtistMatchType::High);
     }
 
-    if list1.len() == 1 && list2.len() > 1 && list2[0].chars().count() > 1 && list1[0].contains(list2[0].as_str()) {
+    if list1.len() == 1
+        && list2.len() > 1
+        && list2[0].chars().count() > 1
+        && list1[0].contains(list2[0].as_str())
+    {
         return Some(ArtistMatchType::Medium);
     }
 
@@ -226,41 +234,36 @@ pub fn compare_artist(artist1: &[String], artist2: &[String]) -> Option<ArtistMa
 
 /// 计算两个字符串在相同位置上字符相等的数量。
 pub fn chars_eq_at(s1: &str, s2: &str) -> usize {
-    s1.chars()
-        .zip(s2.chars())
-        .filter(|(a, b)| a == b)
-        .count()
+    s1.chars().zip(s2.chars()).filter(|(a, b)| a == b).count()
 }
 
 /// 比较两个名称（标题或专辑）的匹配程度，支持繁简中文和特殊标记容错。
 pub fn compare_name(name1: Option<&str>, name2: Option<&str>) -> Option<NameMatchType> {
-    let name1 = name1?;
-    let name2 = name2?;
+    let name1 = name1.filter(|s| !s.trim().is_empty())?;
+    let name2 = name2.filter(|s| !s.trim().is_empty())?;
 
-    let mut n1 = to_simplified(&name1.to_lowercase()).trim().to_string();
-    let mut n2 = to_simplified(&name2.to_lowercase()).trim().to_string();
+    fn normalize_name(name: &str) -> String {
+        let normalized = to_simplified(name)
+            .to_lowercase()
+            .trim()
+            .replace('\u{2019}', "'")
+            .replace('\u{ff0c}', ",")
+            .replace('\u{ff08}', "(")
+            .replace('\u{ff09}', ")")
+            .replace('[', "(")
+            .replace(']', ")");
+        remove_duo_spaces(&normalized)
+            .replace(" (", "(")
+            .replace("( ", "(")
+            .replace(" )", ")")
+    }
+
+    let mut n1 = normalize_name(name1);
+    let mut n2 = normalize_name(name2);
 
     if n1 == n2 {
         return Some(NameMatchType::Perfect);
     }
-
-    n1 = n1
-        .replace('\u{2019}', "'")
-        .replace('\u{ff0c}', ",")
-        .replace("\u{ff08}", " (")
-        .replace("\u{ff09}", " )")
-        .replace('[', "(")
-        .replace(']', ")");
-    n1 = remove_duo_spaces(&n1);
-
-    n2 = n2
-        .replace('\u{2019}', "'")
-        .replace('\u{ff0c}', ",")
-        .replace("\u{ff08}", " (")
-        .replace("\u{ff09}", " )")
-        .replace('[', "(")
-        .replace(']', ")");
-    n2 = remove_duo_spaces(&n2);
 
     n1 = n1.replace("acoustic version", "acoustic");
     n2 = n2.replace("acoustic version", "acoustic");
@@ -410,12 +413,18 @@ mod tests {
 
     #[test]
     fn test_compare_duration_exact() {
-        assert_eq!(compare_duration(Some(180000), Some(180000)), Some(DurationMatchType::Perfect));
+        assert_eq!(
+            compare_duration(Some(180000), Some(180000)),
+            Some(DurationMatchType::Perfect)
+        );
     }
 
     #[test]
     fn test_compare_duration_close() {
-        assert_eq!(compare_duration(Some(180000), Some(180200)), Some(DurationMatchType::VeryHigh));
+        assert_eq!(
+            compare_duration(Some(180000), Some(180200)),
+            Some(DurationMatchType::VeryHigh)
+        );
     }
 
     #[test]
@@ -430,12 +439,18 @@ mod tests {
 
     #[test]
     fn test_compare_name_exact() {
-        assert_eq!(compare_name(Some("Hello"), Some("Hello")), Some(NameMatchType::Perfect));
+        assert_eq!(
+            compare_name(Some("Hello"), Some("Hello")),
+            Some(NameMatchType::Perfect)
+        );
     }
 
     #[test]
     fn test_compare_name_case_insensitive() {
-        assert_eq!(compare_name(Some("Hello"), Some("hello")), Some(NameMatchType::Perfect));
+        assert_eq!(
+            compare_name(Some("Hello"), Some("hello")),
+            Some(NameMatchType::Perfect)
+        );
     }
 
     #[test]
@@ -447,6 +462,19 @@ mod tests {
     #[test]
     fn test_compare_name_none() {
         assert_eq!(compare_name(None, Some("Hello")), None);
+    }
+
+    #[test]
+    fn test_compare_name_blank() {
+        assert_eq!(compare_name(Some("Hello"), Some(" \t ")), None);
+    }
+
+    #[test]
+    fn test_compare_name_fullwidth_brackets() {
+        assert_eq!(
+            compare_name(Some("Song（Deluxe）"), Some("Song (Deluxe)")),
+            Some(NameMatchType::Perfect)
+        );
     }
 
     #[test]
@@ -472,4 +500,3 @@ mod tests {
         assert!(result.is_some());
     }
 }
-
