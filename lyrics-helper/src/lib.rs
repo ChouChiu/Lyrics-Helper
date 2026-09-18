@@ -21,6 +21,8 @@ pub use lyrics_crypto as decrypter;
 #[cfg(feature = "search")]
 pub use lyrics_search as search;
 #[cfg(feature = "search")]
+pub use lyrics_search::error::SearchError;
+#[cfg(feature = "search")]
 pub use lyrics_search::searchers;
 #[cfg(feature = "search")]
 pub use lyrics_search::providers;

@@ -2,11 +2,17 @@
 //!
 //! 对应 C# `BaseApi`：每个请求都单独构造请求头（`CreateRequest`），
 //! 请求头不会在 Provider 之间共享或残留。
+//!
+//! 请求分两步：先由 [`send`] / [`send_json`] / [`send_form`] 发送并拿回原始响应，
+//! 再由 [`json`] / [`text`] 解码响应体。所有失败都返回 [`SearchError`]，
+//! 不再像 0.2 那样把 reqwest / serde 的错误压成 `None`。
 
-use reqwest::Client;
+use reqwest::{Client, Method, RequestBuilder, Response};
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::error::SearchError;
 
 /// 默认 User-Agent，对应 C# `BaseApi.UserAgent`。
 ///
@@ -39,83 +45,70 @@ pub fn unix_millis() -> u128 {
         .unwrap_or(0)
 }
 
-/// 发送 GET 请求并将响应体反序列化为指定类型，失败时返回 `None`。
-pub async fn get_json<T: DeserializeOwned>(url: &str) -> Option<T> {
-    let response = HTTP_CLIENT.get(url).send().await.ok()?;
-    response.json::<T>().await.ok()
-}
-
-/// 发送带自定义请求头的 GET 请求并将响应体反序列化为指定类型。
-pub async fn get_json_with_headers<T: DeserializeOwned>(
+/// 发送不带请求体的请求，返回原始响应。
+pub async fn send(
+    method: Method,
     url: &str,
     headers: &[(&str, &str)],
-) -> Option<T> {
-    let mut request = HTTP_CLIENT.get(url);
-    for (key, value) in headers {
-        request = request.header(*key, *value);
-    }
-    let response = request.send().await.ok()?;
-    response.json::<T>().await.ok()
+) -> Result<Response, SearchError> {
+    send_request(method, url, headers, |request| request).await
 }
 
-/// 发送 JSON POST 请求并将响应体反序列化为指定类型。
-pub async fn post_json<T: DeserializeOwned>(url: &str, body: &impl Serialize) -> Option<T> {
-    let response = HTTP_CLIENT.post(url).json(body).send().await.ok()?;
-    response.json::<T>().await.ok()
-}
-
-/// 发送带自定义请求头的 JSON POST 请求并将响应体反序列化为指定类型。
-pub async fn post_json_with_headers<T: DeserializeOwned>(
+/// 发送 JSON POST 请求，返回原始响应。
+pub async fn send_json(
     url: &str,
     body: &impl Serialize,
     headers: &[(&str, &str)],
-) -> Option<T> {
-    let mut request = HTTP_CLIENT.post(url).json(body);
-    for (key, value) in headers {
-        request = request.header(*key, *value);
-    }
-    let response = request.send().await.ok()?;
-    response.json::<T>().await.ok()
+) -> Result<Response, SearchError> {
+    send_request(Method::POST, url, headers, |request| request.json(body)).await
 }
 
-/// 发送带自定义请求头的 JSON POST 请求，返回原始响应文本。
-pub async fn post_json_raw_with_headers(
-    url: &str,
-    body: &impl Serialize,
-    headers: &[(&str, &str)],
-) -> Option<String> {
-    let mut request = HTTP_CLIENT.post(url).json(body);
-    for (key, value) in headers {
-        request = request.header(*key, *value);
-    }
-    let response = request.send().await.ok()?;
-    response.text().await.ok()
-}
-
-/// 发送表单 POST 请求并将响应体反序列化为指定类型。
-pub async fn post_form<T: DeserializeOwned>(
+/// 发送表单 POST 请求，返回原始响应。
+pub async fn send_form(
     url: &str,
     form: &[(&str, &str)],
     headers: &[(&str, &str)],
-) -> Option<T> {
-    let mut request = HTTP_CLIENT.post(url).form(form);
-    for (key, value) in headers {
-        request = request.header(*key, *value);
-    }
-    let response = request.send().await.ok()?;
-    response.json::<T>().await.ok()
+) -> Result<Response, SearchError> {
+    send_request(Method::POST, url, headers, |request| request.form(form)).await
 }
 
-/// 发送带自定义请求头的表单 POST 请求，返回原始响应文本。
-pub async fn post_form_raw_with_headers(
+/// 将响应体反序列化为指定类型。
+///
+/// 状态码非 2xx 时返回 [`SearchError::Status`]，不会去解析错误页正文。
+pub async fn json<T: DeserializeOwned>(response: Response) -> Result<T, SearchError> {
+    ensure_success(&response)?;
+    response.json::<T>().await.map_err(SearchError::Http)
+}
+
+/// 读取响应体文本。
+///
+/// 状态码非 2xx 时返回 [`SearchError::Status`]；部分平台（如 QQ 音乐）会在 2xx 里
+/// 返回带业务错误码的 JSON，这类正文仍会原样交给调用方。
+pub async fn text(response: Response) -> Result<String, SearchError> {
+    ensure_success(&response)?;
+    response.text().await.map_err(SearchError::Http)
+}
+
+/// 构造请求、附加请求头并发送。
+async fn send_request(
+    method: Method,
     url: &str,
-    form: &[(&str, &str)],
     headers: &[(&str, &str)],
-) -> Option<String> {
-    let mut request = HTTP_CLIENT.post(url).form(form);
+    body: impl FnOnce(RequestBuilder) -> RequestBuilder,
+) -> Result<Response, SearchError> {
+    let mut request = HTTP_CLIENT.request(method, url);
     for (key, value) in headers {
         request = request.header(*key, *value);
     }
-    let response = request.send().await.ok()?;
-    response.text().await.ok()
+    body(request).send().await.map_err(SearchError::Http)
+}
+
+/// 状态码非 2xx 时构造 [`SearchError::Status`]。
+fn ensure_success(response: &Response) -> Result<(), SearchError> {
+    let status = response.status();
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(SearchError::Status(status.as_u16()))
+    }
 }

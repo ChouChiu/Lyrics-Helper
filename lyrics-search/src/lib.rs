@@ -3,6 +3,8 @@
 //! 全部功能依赖网络请求，仅在启用 `search` feature（默认启用）时编译。
 
 #[cfg(feature = "search")]
+pub mod error;
+#[cfg(feature = "search")]
 pub mod providers;
 #[cfg(feature = "search")]
 pub mod searchers;
