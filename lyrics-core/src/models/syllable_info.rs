@@ -230,12 +230,6 @@ impl From<FullSyllableInfo> for SyllableItem {
     }
 }
 
-impl PartialEq for SyllableItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.start_time() == other.start_time() && self.end_time() == other.end_time()
-    }
-}
-
 /// 将音节项列表拼接为完整文本字符串。
 pub fn get_text_from_syllable_items(syllables: &[SyllableItem]) -> String {
     let mut text = String::new();
