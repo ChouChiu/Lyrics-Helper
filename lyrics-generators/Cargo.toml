@@ -10,4 +10,4 @@ description = "Lyrics generator implementations for various formats"
 readme = "README.md"
 
 [dependencies]
-lyrics-core = { path = "../lyrics-core", version = "0.1.1" }
+lyrics-core = { path = "../lyrics-core", version = "0.2" }
