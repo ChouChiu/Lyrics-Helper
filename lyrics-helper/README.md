@@ -83,6 +83,83 @@ let items = to_syllable_items(flat);             // 反向包装
 单个音节项也可以用 `parts()` 取到不分配的 `&[SyllableInfo]`。就地修改
 `FullSyllableInfo` 的子音节后，必须调用 `refresh_properties()` 让缓存失效。
 
+## 从 0.2 升级到 0.3
+
+0.3.0 是破坏性版本：搜索层改为返回类型化错误，`SyllableItem` 的相等语义被移除。
+
+### 搜索层返回 `SearchError` 而不是 `None`
+
+`Searcher::search_for_results*`、`search_with_refinement`、`search_for_best_result*`
+以及各平台 Provider 的可失败入口，全部改为 `Result<_, SearchError>`：
+
+```rust
+use lyrics_helper::models::TrackMetadata;
+use lyrics_helper::searchers::netease::NeteaseSearcher;
+use lyrics_helper::searchers::search_for_best_result;
+use lyrics_helper::SearchError;
+
+let mut track = TrackMetadata::new();
+track.title = Some("晴天".to_string());
+track.artist = Some("周杰伦".to_string());
+track.ensure_artists();
+
+match search_for_best_result(&NeteaseSearcher, &track).await {
+    Ok(Some(best)) => println!("{}", best.title),
+    Ok(None) => println!("没有搜到"), // 搜索成功，但没有结果
+    Err(SearchError::Status(429)) => println!("被限流"),
+    Err(SearchError::Captcha) => println!("命中验证码"),
+    Err(SearchError::Http(error)) if error.is_timeout() => println!("超时"),
+    Err(error) => println!("搜索失败: {error}"),
+}
+```
+
+「没有数据」不再是错误：`Ok(None)` 表示该曲目没有这种歌词（例如没有逐字歌词），
+空 `Vec` 表示搜索成功但没有结果；只有真正的失败才返回 `Err`。
+
+Provider 侧：`netease::api::get_lyrics` 等改返回
+`Result<(Option<String>, Option<String>), SearchError>`；Musixmatch 的 `MusixmatchError`
+被 `SearchError` 取代，`api::set_options` 不再 panic，非法配置返回
+`Err(SearchError::InvalidConfig(_))`；`base_api` 的 7 个请求函数收敛为
+`send` / `send_json` / `send_form` 加 `json` / `text` 两个终结方法，
+非 2xx 状态码统一返回 `SearchError::Status`（签名里用到的 `Method`、`StatusCode`、
+`Response` 已从 `base_api` 再导出）：
+
+```rust
+use lyrics_helper::providers::web::base_api;
+use lyrics_helper::providers::web::base_api::{Method, StatusCode};
+use lyrics_helper::providers::web::lrclib::response::SearchResultItem;
+
+let response = base_api::send(Method::GET, "https://lrclib.net/api/search?track_name=Yesterday", &[])
+    .await
+    .expect("请求失败");
+if response.status() == StatusCode::NOT_FOUND {
+    // 404 这类「没有这首歌」由调用方自己判定
+    return;
+}
+let items: Vec<SearchResultItem> = base_api::json(response).await.expect("解码失败");
+```
+
+### `SyllableItem` 不再实现 `PartialEq`
+
+0.2 的 `SyllableItem` 只比较 `start_time`/`end_time`、完全忽略文本，
+两个文本不同的音节只要时间相同就被判为相等，`contains` / `dedup` / `assert_eq!`
+都会因此给出违反直觉的结果；上游 C# 的 `ISyllableInfo` 本来也没有任何相等语义，
+0.3 直接删掉了这个实现。需要按时间比较时显式写：
+
+```rust
+use lyrics_helper::{SyllableInfo, SyllableItem};
+
+let a = SyllableItem::from(SyllableInfo::new("晴".to_string(), 1000, 1500));
+let b = SyllableItem::from(SyllableInfo::new("天".to_string(), 1000, 1500));
+
+// 0.2 里 a == b 为 true（只比时间），0.3 起没有 PartialEq，必须显式比较
+assert!(a.start_time() == b.start_time() && a.end_time() == b.end_time());
+```
+
+`LineInfo` 的 `PartialEq`/`Ord`（只比开始时间）保留不动——它是给排序用的，
+对应上游 C# 的 `IComparable`。
+
+
 ## 支持的格式
 
 | 功能 | 格式 |

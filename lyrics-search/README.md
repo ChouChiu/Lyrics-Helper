@@ -24,11 +24,31 @@ lyrics-search = "0.3"
 
 ## 使用
 
-通常不需要直接依赖此 crate，建议使用门面库 `lyrics-helper`：
+通常不需要直接依赖此 crate，建议使用门面库 `lyrics-helper`。
+
+各平台搜索结果统一由 `Searcher` trait 给出，失败原因通过类型化错误暴露：
 
 ```rust
-use lyrics_helper::search::search_song;
+use lyrics_search::searchers::netease::NeteaseSearcher;
+use lyrics_search::searchers::search_for_best_result;
+use lyrics_search::error::SearchError;
+use lyrics_core::models::TrackMetadata;
+
+let mut track = TrackMetadata::new();
+track.title = Some("晴天".to_string());
+track.artist = Some("周杰伦".to_string());
+track.ensure_artists();
+
+match search_for_best_result(&NeteaseSearcher, &track).await {
+    Ok(Some(best)) => println!("{}", best.title),
+    Ok(None) => println!("搜索成功但没有结果"),
+    Err(SearchError::Captcha) => println!("命中验证码"),
+    Err(error) => println!("搜索失败: {error}"),
+}
 ```
+
+`Ok(vec![])` 与 `Ok(None)` 表示「没有数据」，`Err` 才表示请求失败；具体变体见
+`lyrics_search::error::SearchError`。
 
 ## 许可证
 
