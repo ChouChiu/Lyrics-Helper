@@ -7,12 +7,15 @@
 //! 再由 [`json`] / [`text`] 解码响应体。所有失败都返回 [`SearchError`]，
 //! 不再像 0.2 那样把 reqwest / serde 的错误压成 `None`。
 
-use reqwest::{Client, Method, RequestBuilder, Response};
+use reqwest::{Client, RequestBuilder};
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::SearchError;
+
+// 公开签名里出现的 reqwest 类型一并再导出，调用方不必自己依赖 reqwest。
+pub use reqwest::{Method, Response, StatusCode};
 
 /// 默认 User-Agent，对应 C# `BaseApi.UserAgent`。
 ///
