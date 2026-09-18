@@ -85,6 +85,35 @@ pub fn lcs_length(x: &str, y: &str) -> usize {
     prev[n]
 }
 
+/// 判断字符是否为中日文字符（CJK 统一表意文字、扩展 A、平假名、片假名及其扩展）。
+pub fn is_chinese_or_japanese_character(character: char) -> bool {
+    matches!(character,
+        '\u{4E00}'..='\u{9FFF}'
+        | '\u{3400}'..='\u{4DBF}'
+        | '\u{3040}'..='\u{309F}'
+        | '\u{30A0}'..='\u{30FF}'
+        | '\u{31F0}'..='\u{31FF}')
+}
+
+/// 判断文本是否包含中文（`\u{4e00}-\u{9fff}`），对应 C# `StringHelper.HasChinese`。
+///
+/// 只覆盖 CJK 统一表意文字区，不含假名，与 [`is_chinese_or_japanese_character`] 的范围不同。
+pub fn has_chinese(s: &str) -> bool {
+    s.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+}
+
+/// 将字符串中所有连续空白折叠为单个空格，并去除首尾空白。
+pub fn collapse_whitespace(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for part in s.split_whitespace() {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        result.push_str(part);
+    }
+    result
+}
+
 /// 将字符串中连续的空格压缩为单个空格。
 pub fn remove_duo_spaces(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
