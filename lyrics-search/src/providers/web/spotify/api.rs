@@ -18,11 +18,11 @@ pub(crate) async fn search(
         "https://api.spotify.com/v1/search?q={}&type=track&limit=10&market=from_token",
         urlencoding::encode(keyword),
     );
+    let authorization = format!("Bearer {access_token}");
     let headers = [
-        ("Authorization", format!("Bearer {}", access_token)),
-        ("User-Agent", USER_AGENT.to_string()),
+        ("Authorization", authorization.as_str()),
+        ("User-Agent", USER_AGENT),
     ];
-    let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let response = base_api::send(Method::GET, &url, &header_refs).await?;
+    let response = base_api::send(Method::GET, &url, &headers).await?;
     base_api::json(response).await
 }

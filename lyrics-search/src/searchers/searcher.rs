@@ -33,13 +33,7 @@ pub trait Searcher: Sync {
         &self,
         track: &TrackMetadata,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        let title = track.title.as_deref().unwrap_or("");
-        let artist = track.artist.as_deref().unwrap_or("").replace(", ", " ");
-        let album = track.album.as_deref().unwrap_or("");
-        let search_string = format!("{} {} {}", title, artist, album)
-            .replace(" - ", " ")
-            .trim()
-            .to_string();
-        self.search_for_results_str(&search_string).await
+        self.search_for_results_str(&super::build_search_string(track))
+            .await
     }
 }

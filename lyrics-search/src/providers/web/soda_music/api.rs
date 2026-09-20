@@ -6,9 +6,6 @@ use crate::providers::web::base_api;
 use rand::Rng;
 use std::sync::LazyLock;
 
-/// PC/H5 接口使用的默认 User-Agent（对应 C# `Api.UserAgent`）。
-pub const USER_AGENT: &str = "LunaPC/2.1.0(12292405)";
-
 /// 搜索接口使用的 Android User-Agent。
 const SEARCH_USER_AGENT: &str = "com.luna.music/100198030 (Linux; U; Android 15; zh_CN_#Hans; ABR-AL80; Build/V417IR;tt-ok/3.12.13.19)";
 
@@ -40,11 +37,11 @@ fn build_url(base: &str, path: &str, query: &[(&str, String)]) -> String {
     format!("{}{}?{}", base, path, qs.join("&"))
 }
 
-/// 获取汽水音乐歌曲详情（H5 `seo_track` 接口）。
+/// 获取汽水音乐歌词，返回 `(原文歌词, 翻译歌词)`。
 ///
-/// 网络、HTTP 状态码或响应解码失败时返回 [`SearchError`]；`seo_track` 与 `track`
-/// 都缺失属于「响应成功但没有详情」，仍返回成功值。
-pub async fn get_detail(track_id: &str) -> Result<TrackDetailResponse, SearchError> {
+/// 请求成功但该曲目没有歌词（缺少 `lyric` 字段，或正文/翻译为空）时对应元素为 `None`；
+/// 网络、HTTP 状态码或响应解码失败返回 [`SearchError`]。
+pub async fn get_lyrics(track_id: &str) -> Result<(Option<String>, Option<String>), SearchError> {
     let query = [
         ("track_id", track_id.to_string()),
         ("device_platform", "web".to_string()),
@@ -56,36 +53,23 @@ pub async fn get_detail(track_id: &str) -> Result<TrackDetailResponse, SearchErr
     ];
 
     let response = base_api::send(Method::GET, &url, &headers).await?;
-    let mut result: TrackDetailResponse = base_api::json(response).await?;
+    let detail: TrackDetailResponse = base_api::json(response).await?;
 
-    if let Some(seo_track) = result.seo_track.as_ref() {
-        if result.track.is_none() {
-            result.track = seo_track.track.clone();
-        }
-        if result.track_player.is_none() {
-            result.track_player = seo_track.track_player.clone();
-        }
-    }
-
-    Ok(result)
-}
-
-/// 获取汽水音乐歌词，返回 `(原文歌词, 翻译歌词)`。
-///
-/// 请求成功但该曲目没有歌词（缺少 `lyric` 字段，或正文/翻译为空）时返回
-/// `Ok((None, None))` 对应的元素为 `None`；网络、HTTP 状态码或响应解码失败
-/// 返回 [`SearchError`]。
-pub async fn get_lyrics(track_id: &str) -> Result<(Option<String>, Option<String>), SearchError> {
-    let detail = get_detail(track_id).await?;
-    let Some(lyric) = detail.lyric else {
+    // 歌词可能在顶层，也可能只在 `seo_track` 下。
+    let Some(lyric) = detail
+        .lyric
+        .or_else(|| detail.seo_track.and_then(|seo_track| seo_track.lyric))
+    else {
         return Ok((None, None));
     };
-    let original = lyric.content.filter(|c| !c.is_empty());
-    let translation = lyric
-        .translations
-        .and_then(|t| t.cn)
-        .filter(|c| !c.is_empty());
-    Ok((original, translation))
+
+    Ok((
+        lyric.content.filter(|content| !content.is_empty()),
+        lyric
+            .translations
+            .and_then(|translations| translations.cn)
+            .filter(|content| !content.is_empty()),
+    ))
 }
 
 /// 搜索汽水音乐曲目。

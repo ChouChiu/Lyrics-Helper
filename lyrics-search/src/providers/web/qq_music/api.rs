@@ -9,6 +9,9 @@ use super::response::{LyricsResponse, MusicuResponse};
 use crate::error::SearchError;
 use crate::providers::web::base_api;
 
+/// QQ 音乐统一业务接口地址。
+const MUSICU_URL: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
+
 const QQ_HEADERS: &[(&str, &str)] = &[
     ("User-Agent", "okhttp/3.14.9"),
     ("Cookie", "tmeLoginType=-1;"),
@@ -90,8 +93,6 @@ struct SessionResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 struct SessionReqData {
-    #[serde(rename = "code")]
-    _code: Option<i32>,
     data: Option<SessionData>,
 }
 
@@ -109,29 +110,40 @@ struct SessionInfo {
 
 static SESSION: OnceCell<Option<(String, String, String)>> = OnceCell::const_new();
 
+impl Comm {
+    /// 构造公共参数：除身份三元组外全是固定的客户端标识。
+    fn new(uid: Option<String>, sid: Option<String>, userip: Option<String>) -> Self {
+        Self {
+            ct: 11,
+            cv: "1003006".to_string(),
+            v: "1003006".to_string(),
+            os_ver: "15".to_string(),
+            phonetype: "24122RKC7C".to_string(),
+            rom: "Redmi/miro/miro:15/AE3A.240806.005/OS2.0.105.0.VOMCNXM:user/release-keys"
+                .to_string(),
+            tme_app_id: "qqmusiclight".to_string(),
+            nettype: "NETWORK_WIFI".to_string(),
+            udid: "0".to_string(),
+            uid,
+            sid,
+            userip,
+        }
+    }
+
+    /// 尚未取得 session 时使用的匿名身份。
+    fn anonymous() -> Self {
+        Self::new(Some("0".to_string()), None, None)
+    }
+}
+
 /// 初始化 QQ 音乐匿名 session。
 ///
 /// `Ok(None)` 表示平台在 2xx 里没有下发 session（缺 `request` / `data` / `session`），
 /// 属于「没有数据」而非失败；请求失败或平台返回非 0 业务码时返回 [`SearchError`]。
 /// 两种情况都由 [`get_session`] 降级成「没有 session」，不会打断搜索与取词。
 async fn init_session() -> Result<Option<(String, String, String)>, SearchError> {
-    let comm = Comm {
-        ct: 11,
-        cv: "1003006".to_string(),
-        v: "1003006".to_string(),
-        os_ver: "15".to_string(),
-        phonetype: "24122RKC7C".to_string(),
-        rom: "Redmi/miro/miro:15/AE3A.240806.005/OS2.0.105.0.VOMCNXM:user/release-keys".to_string(),
-        tme_app_id: "qqmusiclight".to_string(),
-        nettype: "NETWORK_WIFI".to_string(),
-        udid: "0".to_string(),
-        uid: None,
-        sid: None,
-        userip: None,
-    };
-
     let body = SessionBody {
-        comm,
+        comm: Comm::anonymous(),
         request: SessionRequestBody {
             method: "GetSession".to_string(),
             module: "music.getSession.session".to_string(),
@@ -143,18 +155,14 @@ async fn init_session() -> Result<Option<(String, String, String)>, SearchError>
         },
     };
 
-    let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
-    let response = base_api::send_json(url, &body, QQ_HEADERS).await?;
+    let response = base_api::send_json(MUSICU_URL, &body, QQ_HEADERS).await?;
     let session_resp: SessionResponse = base_api::json(response).await?;
 
     // 缺 `code` 字段按上游 C# 的语义视作成功（C# 的 `int` 默认值即 0），只有非 0 才是业务失败。
-    match session_resp.code {
-        None | Some(0) => {}
-        Some(code) => {
-            return Err(SearchError::Api(format!(
-                "QQ 音乐 session 初始化失败：code {code}"
-            )));
-        }
+    if let Some(code) = session_resp.code.filter(|code| *code != 0) {
+        return Err(SearchError::Api(format!(
+            "QQ 音乐 session 初始化失败：code {code}"
+        )));
     }
 
     let Some(session) = session_resp
@@ -184,25 +192,11 @@ async fn get_session() -> &'static Option<(String, String, String)> {
 }
 
 async fn get_comm() -> Comm {
-    let (uid, sid, userip) = get_session()
-        .await
-        .as_ref()
-        .map(|(u, s, ip)| (Some(u.clone()), Some(s.clone()), Some(ip.clone())))
-        .unwrap_or((Some("0".to_string()), None, None));
-
-    Comm {
-        ct: 11,
-        cv: "1003006".to_string(),
-        v: "1003006".to_string(),
-        os_ver: "15".to_string(),
-        phonetype: "24122RKC7C".to_string(),
-        rom: "Redmi/miro/miro:15/AE3A.240806.005/OS2.0.105.0.VOMCNXM:user/release-keys".to_string(),
-        tme_app_id: "qqmusiclight".to_string(),
-        nettype: "NETWORK_WIFI".to_string(),
-        udid: "0".to_string(),
-        uid,
-        sid,
-        userip,
+    match get_session().await {
+        Some((uid, sid, userip)) => {
+            Comm::new(Some(uid.clone()), Some(sid.clone()), Some(userip.clone()))
+        }
+        None => Comm::anonymous(),
     }
 }
 
@@ -215,7 +209,6 @@ fn generate_search_id() -> String {
 }
 
 pub(crate) async fn search(keyword: &str) -> Result<MusicuResponse, SearchError> {
-    let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
     let body = MusicuBody {
         comm: get_comm().await,
         request: RequestBody {
@@ -236,7 +229,7 @@ pub(crate) async fn search(keyword: &str) -> Result<MusicuResponse, SearchError>
         },
     };
 
-    let response = base_api::send_json(url, &body, QQ_HEADERS).await?;
+    let response = base_api::send_json(MUSICU_URL, &body, QQ_HEADERS).await?;
     base_api::json(response).await
 }
 
@@ -296,7 +289,6 @@ pub async fn get_lyrics(
     album: &str,
     duration_ms: Option<i32>,
 ) -> Result<(Option<String>, Option<String>), SearchError> {
-    let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
     let interval = duration_ms.unwrap_or(0) / 1000;
 
     let body = LyricsBody {
@@ -326,7 +318,7 @@ pub async fn get_lyrics(
         },
     };
 
-    let response = base_api::send_json(url, &body, QQ_HEADERS).await?;
+    let response = base_api::send_json(MUSICU_URL, &body, QQ_HEADERS).await?;
     let result: LyricsResponse = base_api::json(response).await?;
 
     // 平台没返回歌词数据属于「这首没有歌词」，不是错误。

@@ -46,31 +46,26 @@ impl Searcher for SpotifySearcher {
         let search_results: Vec<SearchResult> = tracks
             .into_iter()
             .filter_map(|track| {
-                let artists: Vec<String> = track
-                    .artists
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|a| a.name)
-                    .collect();
-
                 // 没有专辑信息的条目直接跳过，不视为请求失败。
-                let album = track.album.as_ref()?;
-                let album_name = album.name.clone();
-                let album_artists: Option<Vec<String>> = album
-                    .artists
-                    .as_ref()
-                    .map(|artists| artists.iter().map(|a| a.name.clone()).collect());
+                let album = track.album?;
 
                 Some(SearchResult {
-                    searcher_type: Searchers::Spotify,
-                    title: track.name,
-                    artists,
-                    album: album_name,
-                    album_artists,
-                    duration_ms: Some(track.duration_ms),
-                    match_type: None,
-                    id: track.id,
-                    numeric_id: None,
+                    album_artists: album
+                        .artists
+                        .map(|artists| artists.into_iter().map(|artist| artist.name).collect()),
+                    ..SearchResult::new(
+                        Searchers::Spotify,
+                        track.name,
+                        track
+                            .artists
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|artist| artist.name)
+                            .collect(),
+                        album.name,
+                        Some(track.duration_ms),
+                        track.id,
+                    )
                 })
             })
             .collect();

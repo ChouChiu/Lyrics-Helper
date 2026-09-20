@@ -6,17 +6,10 @@ use super::searcher::Searcher;
 use crate::error::SearchError;
 use crate::providers::web::kugou::api;
 
+use super::search_result::split_artists;
+
 /// 酷狗音乐歌词搜索器。
 pub struct KugouSearcher;
-
-/// 将艺术家字符串按逗号、顿号或斜杠拆分为列表。
-fn split_artists(singername: &str) -> Vec<String> {
-    singername
-        .split([',', '、', '/'])
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
 
 #[async_trait]
 impl Searcher for KugouSearcher {
@@ -46,19 +39,14 @@ impl Searcher for KugouSearcher {
         let search_results: Vec<SearchResult> = songs
             .into_iter()
             .map(|song| {
-                let artists = split_artists(&song.singername);
-
-                SearchResult {
-                    searcher_type: Searchers::Kugou,
-                    title: song.songname,
-                    artists,
-                    album: song.album_name.unwrap_or_default(),
-                    album_artists: None,
-                    duration_ms: song.duration.map(|d| d * 1000),
-                    match_type: None,
-                    id: song.hash,
-                    numeric_id: None,
-                }
+                SearchResult::new(
+                    Searchers::Kugou,
+                    song.songname,
+                    split_artists(&song.singername),
+                    song.album_name.unwrap_or_default(),
+                    song.duration.map(|duration| duration * 1000),
+                    song.hash,
+                )
             })
             .collect();
 

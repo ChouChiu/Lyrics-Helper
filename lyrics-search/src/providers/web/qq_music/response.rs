@@ -19,14 +19,13 @@ pub(crate) struct RequestDataInner {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Body {
-    #[serde(rename = "item_song")]
     pub(crate) item_song: Option<Vec<SongItem>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct SongItem {
     #[serde(rename = "id")]
-    pub(crate) _id: Option<i64>,
+    pub(crate) numeric_id: Option<i64>,
     pub(crate) mid: String,
     pub(crate) title: String,
     pub(crate) singer: Option<Vec<Singer>>,
@@ -56,9 +55,6 @@ pub struct LyricsResponse {
 /// QQ 音乐歌词请求数据。
 #[derive(Debug, Clone, Deserialize)]
 pub struct LyricsReqData {
-    /// 内部状态码
-    #[serde(rename = "code")]
-    pub _code: Option<i32>,
     /// 歌词数据
     pub data: Option<LyricsReqInner>,
 }
@@ -72,22 +68,12 @@ pub struct LyricsReqInner {
     pub trans: Option<String>,
     /// 罗马音歌词
     pub roma: Option<String>,
-    #[serde(rename = "lyric_url")]
-    pub _lyric_url: Option<String>,
-    #[serde(rename = "trans_url")]
-    pub _trans_url: Option<String>,
-    #[serde(rename = "roma_url")]
-    pub _roma_url: Option<String>,
     /// LRC 格式类型标记
-    #[serde(rename = "lrc_t")]
     pub lrc_t: Option<i32>,
     /// QRC 格式类型标记
-    #[serde(rename = "qrc_t")]
     pub qrc_t: Option<i32>,
     /// 翻译格式类型标记
-    #[serde(rename = "trans_t")]
     pub trans_t: Option<i32>,
     /// 罗马音格式类型标记
-    #[serde(rename = "roma_t")]
     pub roma_t: Option<i32>,
 }

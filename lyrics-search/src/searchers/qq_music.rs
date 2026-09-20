@@ -29,25 +29,13 @@ impl Searcher for QQMusicSearcher {
     ) -> Result<Vec<SearchResult>, SearchError> {
         let response = api::search(search_string).await?;
 
-        if let Some(code) = response.code {
-            if code != 0 {
-                return Err(SearchError::Api(format!("QQ 音乐搜索返回错误码 {code}")));
-            }
-        }
+        ensure_ok(response.code, "搜索")?;
 
-        let req = match response.request {
-            Some(req) => req,
-            // 缺少 request 只是「没有匹配」，不是错误。
-            None => return Ok(Vec::new()),
+        // 缺少 request 只是「没有匹配」，不是错误。
+        let Some(req) = response.request else {
+            return Ok(Vec::new());
         };
-
-        if let Some(code) = req.code {
-            if code != 0 {
-                return Err(SearchError::Api(format!(
-                    "QQ 音乐搜索请求返回错误码 {code}"
-                )));
-            }
-        }
+        ensure_ok(req.code, "搜索请求")?;
 
         // 缺少 data / body / item_song 都只是「没有匹配」，不是错误。
         let Some(songs) = req
@@ -60,28 +48,31 @@ impl Searcher for QQMusicSearcher {
 
         let search_results: Vec<SearchResult> = songs
             .into_iter()
-            .map(|song| {
-                let artists: Vec<String> = song
-                    .singer
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|s| s.name)
-                    .collect();
-
-                SearchResult {
-                    searcher_type: Searchers::QQMusic,
-                    title: song.title,
-                    artists,
-                    album: song.album.map(|a| a.name).unwrap_or_default(),
-                    album_artists: None,
-                    duration_ms: song.interval.map(|i| i * 1000),
-                    match_type: None,
-                    id: song.mid,
-                    numeric_id: song._id,
-                }
+            .map(|song| SearchResult {
+                numeric_id: song.numeric_id,
+                ..SearchResult::new(
+                    Searchers::QQMusic,
+                    song.title,
+                    song.singer
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|singer| singer.name)
+                        .collect(),
+                    song.album.map(|album| album.name).unwrap_or_default(),
+                    song.interval.map(|interval| interval * 1000),
+                    song.mid,
+                )
             })
             .collect();
 
         Ok(search_results)
+    }
+}
+
+/// 业务码非 0 即平台侧失败；缺失时按上游 C# 的 `int` 默认值视作 0。
+fn ensure_ok(code: Option<i32>, scope: &str) -> Result<(), SearchError> {
+    match code {
+        None | Some(0) => Ok(()),
+        Some(code) => Err(SearchError::Api(format!("QQ 音乐{scope}返回错误码 {code}"))),
     }
 }

@@ -49,27 +49,19 @@ fn map_results(response: SearchResponse) -> Vec<SearchResult> {
             }
             let track = item.entity?.track?;
 
-            let artists: Vec<String> = track
-                .artists
-                .as_ref()
-                .map(|a| a.iter().map(|ar| ar.name.clone()).collect())
-                .unwrap_or_default();
-
-            Some(SearchResult {
-                searcher_type: Searchers::SodaMusic,
-                title: track.name,
-                artists,
-                album: track
-                    .album
-                    .as_ref()
-                    .map(|a| a.name.clone())
-                    .unwrap_or_default(),
-                album_artists: None,
-                duration_ms: track.duration.map(|d| d as i32),
-                match_type: None,
-                id: track.id,
-                numeric_id: None,
-            })
+            Some(SearchResult::new(
+                Searchers::SodaMusic,
+                track.name,
+                track
+                    .artists
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|artist| artist.name)
+                    .collect(),
+                track.album.map(|album| album.name).unwrap_or_default(),
+                track.duration.map(|duration| duration as i32),
+                track.id,
+            ))
         })
         .collect()
 }

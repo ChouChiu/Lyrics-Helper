@@ -51,20 +51,6 @@ pub enum NameMatchType {
     Perfect = 4,
 }
 
-impl NameMatchType {
-    /// 返回该匹配等级对应的分值。
-    pub fn score(self) -> f64 {
-        match self {
-            NameMatchType::Perfect => 7.0,
-            NameMatchType::VeryHigh => 6.0,
-            NameMatchType::High => 5.0,
-            NameMatchType::Medium => 4.0,
-            NameMatchType::Low => 2.0,
-            NameMatchType::NoMatch => 0.0,
-        }
-    }
-}
-
 /// 艺术家匹配等级。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtistMatchType {
@@ -80,20 +66,6 @@ pub enum ArtistMatchType {
     VeryHigh = 3,
     /// 完全匹配
     Perfect = 4,
-}
-
-impl ArtistMatchType {
-    /// 返回该匹配等级对应的分值。
-    pub fn score(self) -> f64 {
-        match self {
-            ArtistMatchType::Perfect => 7.0,
-            ArtistMatchType::VeryHigh => 6.0,
-            ArtistMatchType::High => 5.0,
-            ArtistMatchType::Medium => 4.0,
-            ArtistMatchType::Low => 2.0,
-            ArtistMatchType::NoMatch => 0.0,
-        }
-    }
 }
 
 /// 时长匹配等级。
@@ -113,17 +85,36 @@ pub enum DurationMatchType {
     Perfect = 4,
 }
 
+/// 三种匹配等级共用的分值表（判别值 -1..=4 映射到分值）。
+fn level_score(level: i32) -> f64 {
+    match level {
+        4 => 7.0, // Perfect
+        3 => 6.0, // VeryHigh
+        2 => 5.0, // High
+        1 => 4.0, // Medium
+        0 => 2.0, // Low
+        _ => 0.0, // NoMatch
+    }
+}
+
+impl NameMatchType {
+    /// 返回该匹配等级对应的分值。
+    pub fn score(self) -> f64 {
+        level_score(self as i32)
+    }
+}
+
+impl ArtistMatchType {
+    /// 返回该匹配等级对应的分值。
+    pub fn score(self) -> f64 {
+        level_score(self as i32)
+    }
+}
+
 impl DurationMatchType {
     /// 返回该匹配等级对应的分值。
     pub fn score(self) -> f64 {
-        match self {
-            DurationMatchType::Perfect => 7.0,
-            DurationMatchType::VeryHigh => 6.0,
-            DurationMatchType::High => 5.0,
-            DurationMatchType::Medium => 4.0,
-            DurationMatchType::Low => 2.0,
-            DurationMatchType::NoMatch => 0.0,
-        }
+        level_score(self as i32)
     }
 }
 
@@ -276,102 +267,70 @@ pub fn compare_name(name1: Option<&str>, name2: Option<&str>) -> Option<NameMatc
         }
     }
 
+    /// 取 `marker` 首次出现之前、去掉首尾空白的部分。
+    fn prefix_before<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
+        text.find(marker).map(|index| text[..index].trim())
+    }
+
+    /// 一侧带 `(special…` 标记、另一侧没有：去掉标记段后相等即视为同一首。
     fn special_compare(str1: &str, str2: &str, special: &str) -> bool {
-        let special = format!("({special}");
-        let c1 = str1.contains(&special);
-        let c2 = str2.contains(&special);
-        if c1 && !c2 {
-            let idx = str1.find(&special).unwrap();
-            if str1[..idx].trim() == str2 {
-                return true;
-            }
+        let marker = format!("({special}");
+        match (prefix_before(str1, &marker), prefix_before(str2, &marker)) {
+            (Some(prefix), None) => prefix == str2,
+            (None, Some(prefix)) => prefix == str1,
+            _ => false,
         }
-        if c2 && !c1 {
-            let idx = str2.find(&special).unwrap();
-            if str2[..idx].trim() == str1 {
-                return true;
-            }
-        }
-        false
     }
 
+    /// 两侧都带同一个 `(special…` 标记：比较标记之前的部分。
     fn single_special_compare(str1: &str, str2: &str, special: &str) -> bool {
-        let special = format!("({special}");
-        if str1.contains(&special) && str2.contains(&special) {
-            let i1 = str1.find(&special).unwrap();
-            let i2 = str2.find(&special).unwrap();
-            if str1[..i1].trim() == str2[..i2].trim() {
-                return true;
-            }
+        let marker = format!("({special}");
+        match (prefix_before(str1, &marker), prefix_before(str2, &marker)) {
+            (Some(prefix1), Some(prefix2)) => prefix1 == prefix2,
+            _ => false,
         }
-        false
     }
 
+    /// 两侧分别带两个不同的 `(special…` 标记：比较各自标记之前的部分。
     fn duo_special_compare(str1: &str, str2: &str, special1: &str, special2: &str) -> bool {
-        let s1 = format!("({special1}");
-        let s2 = format!("({special2}");
-        if str1.contains(&s1) && str2.contains(&s2) {
-            let i1 = str1.find(&s1).unwrap();
-            let i2 = str2.find(&s2).unwrap();
-            if str1[..i1].trim() == str2[..i2].trim() {
-                return true;
-            }
-        }
-        if str1.contains(&s2) && str2.contains(&s1) {
-            let i1 = str1.find(&s2).unwrap();
-            let i2 = str2.find(&s1).unwrap();
-            if str1[..i1].trim() == str2[..i2].trim() {
-                return true;
-            }
-        }
-        false
+        let marker1 = format!("({special1}");
+        let marker2 = format!("({special2}");
+        matches!(
+            (prefix_before(str1, &marker1), prefix_before(str2, &marker2)),
+            (Some(prefix1), Some(prefix2)) if prefix1 == prefix2
+        ) || matches!(
+            (prefix_before(str1, &marker2), prefix_before(str2, &marker1)),
+            (Some(prefix1), Some(prefix2)) if prefix1 == prefix2
+        )
     }
 
+    /// 一侧带括号、另一侧没有：去掉括号段后相等即视为同一首。
     fn brackets_compare(str1: &str, str2: &str) -> bool {
-        if str1.contains('(') && !str2.contains('(') {
-            let idx = str1.find('(').unwrap();
-            if str1[..idx].trim() == str2 {
-                return true;
-            }
-        }
-        if str2.contains('(') && !str1.contains('(') {
-            let idx = str2.find('(').unwrap();
-            if str2[..idx].trim() == str1 {
-                return true;
-            }
-        }
-        false
+        special_compare(str1, str2, "")
     }
 
-    if special_compare(&n1, &n2, "deluxe") {
-        return Some(NameMatchType::VeryHigh);
-    }
-    if special_compare(&n1, &n2, "explicit") {
-        return Some(NameMatchType::VeryHigh);
-    }
-    if special_compare(&n1, &n2, "special edition") {
-        return Some(NameMatchType::VeryHigh);
-    }
-    if special_compare(&n1, &n2, "bonus track") {
-        return Some(NameMatchType::VeryHigh);
-    }
-    if special_compare(&n1, &n2, "feat") {
-        return Some(NameMatchType::VeryHigh);
-    }
-    if special_compare(&n1, &n2, "with") {
+    /// 只出现在其中一侧、可以忽略的版本标记。
+    const OPTIONAL_MARKERS: [&str; 6] = [
+        "deluxe",
+        "explicit",
+        "special edition",
+        "bonus track",
+        "feat",
+        "with",
+    ];
+
+    if OPTIONAL_MARKERS
+        .iter()
+        .any(|marker| special_compare(&n1, &n2, marker))
+    {
         return Some(NameMatchType::VeryHigh);
     }
 
-    if duo_special_compare(&n1, &n2, "feat", "explicit") {
-        return Some(NameMatchType::High);
-    }
-    if duo_special_compare(&n1, &n2, "with", "explicit") {
-        return Some(NameMatchType::High);
-    }
-    if single_special_compare(&n1, &n2, "feat") {
-        return Some(NameMatchType::High);
-    }
-    if single_special_compare(&n1, &n2, "with") {
+    if duo_special_compare(&n1, &n2, "feat", "explicit")
+        || duo_special_compare(&n1, &n2, "with", "explicit")
+        || single_special_compare(&n1, &n2, "feat")
+        || single_special_compare(&n1, &n2, "with")
+    {
         return Some(NameMatchType::High);
     }
 

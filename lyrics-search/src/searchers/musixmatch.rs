@@ -7,8 +7,7 @@ use crate::providers::web::musixmatch::api;
 use crate::providers::web::musixmatch::response::Track;
 
 use super::Searchers;
-use super::compare_track_result;
-use super::search_result::SearchResult;
+use super::search_result::{SearchResult, split_artists};
 use super::searcher::Searcher;
 
 /// Musixmatch 歌词搜索器。
@@ -56,25 +55,14 @@ impl Searcher for MusixmatchSearcher {
 
 /// 将 Musixmatch 曲目映射为搜索结果。
 fn to_search_result(track: &Track) -> SearchResult {
-    let artists: Vec<String> = track
-        .artist_name
-        .split(" feat. ")
-        .flat_map(|s| s.split(" & "))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    SearchResult {
-        searcher_type: Searchers::Musixmatch,
-        title: track.track_name.clone(),
-        artists,
-        album: track.album_name.clone().unwrap_or_default(),
-        album_artists: None,
-        duration_ms: Some(track.track_length * 1000),
-        match_type: None,
-        id: track.track_id.to_string(),
-        numeric_id: None,
-    }
+    SearchResult::new(
+        Searchers::Musixmatch,
+        track.track_name.clone(),
+        split_artists(&track.artist_name),
+        track.album_name.clone().unwrap_or_default(),
+        Some(track.track_length * 1000),
+        track.track_id.to_string(),
+    )
 }
 
 /// 提供曲目信息时写入匹配等级并按匹配度降序排序。
@@ -95,11 +83,7 @@ fn rank_results(
         duration_ms,
         ..Default::default()
     };
-    for result in &mut results {
-        result.match_type = Some(compare_track_result(&metadata, result));
-    }
-    results
-        .sort_by_key(|result| std::cmp::Reverse(result.match_type.map(|m| m as i32).unwrap_or(-1)));
+    super::rank_by_match(&mut results, &metadata);
     results
 }
 

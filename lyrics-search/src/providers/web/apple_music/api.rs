@@ -20,13 +20,13 @@ pub(crate) async fn search(
         urlencoding::encode(keyword),
         language,
     );
+    let authorization = format!("Bearer {access_token}");
     let headers = [
-        ("Authorization", format!("Bearer {}", access_token)),
-        ("Origin", "https://music.apple.com".to_string()),
-        ("Referer", "https://music.apple.com/".to_string()),
-        ("Accept", "application/json".to_string()),
+        ("Authorization", authorization.as_str()),
+        ("Origin", "https://music.apple.com"),
+        ("Referer", "https://music.apple.com/"),
+        ("Accept", "application/json"),
     ];
-    let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let response = base_api::send(Method::GET, &url, &header_refs).await?;
+    let response = base_api::send(Method::GET, &url, &headers).await?;
     base_api::json(response).await
 }

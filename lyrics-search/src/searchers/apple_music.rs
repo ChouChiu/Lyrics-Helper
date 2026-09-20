@@ -63,17 +63,14 @@ impl Searcher for AppleMusicSearcher {
             .into_iter()
             .filter_map(|song| {
                 let attrs = song.attributes?;
-                Some(SearchResult {
-                    searcher_type: Searchers::AppleMusic,
-                    title: attrs.name,
-                    artists: vec![attrs.artist_name],
-                    album: attrs.album_name,
-                    album_artists: None,
-                    duration_ms: attrs.duration_in_millis,
-                    match_type: None,
-                    id: song.id,
-                    numeric_id: None,
-                })
+                Some(SearchResult::new(
+                    Searchers::AppleMusic,
+                    attrs.name,
+                    vec![attrs.artist_name],
+                    attrs.album_name,
+                    attrs.duration_in_millis,
+                    song.id,
+                ))
             })
             .collect();
 

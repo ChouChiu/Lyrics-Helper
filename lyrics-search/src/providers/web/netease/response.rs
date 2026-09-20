@@ -23,16 +23,11 @@ pub(crate) struct Song {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Artist {
-    // 上游用 Newtonsoft 解析，缺字段不会失败；这里同样容忍缺失。
-    #[serde(rename = "id", default)]
-    pub(crate) _id: i64,
     pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Album {
-    #[serde(rename = "id", default)]
-    pub(crate) _id: i64,
     pub(crate) name: String,
 }
 

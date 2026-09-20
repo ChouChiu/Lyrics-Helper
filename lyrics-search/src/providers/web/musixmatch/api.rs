@@ -1,6 +1,7 @@
 use super::api_options::ApiOptions;
 use super::response::{Track, TrackResponse};
 use crate::error::SearchError;
+use crate::providers::web::base_api;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
@@ -162,12 +163,11 @@ async fn get_full_lyrics_value(
 
     for attempt in 0..RESULT_RETRY_COUNT {
         let response = get_lyrics_response(id).await?;
-        if let Some(track) = get_matched_track(&response) {
-            if track.track_id == id
-                && vanity_matches(expected_vanity_id, track.commontrack_vanity_id.as_deref())
-            {
-                return Ok(Some(response));
-            }
+        if let Some(track) = get_matched_track(&response)
+            && track.track_id == id
+            && vanity_matches(expected_vanity_id, track.commontrack_vanity_id.as_deref())
+        {
+            return Ok(Some(response));
         }
 
         if attempt + 1 < RESULT_RETRY_COUNT {
@@ -500,24 +500,18 @@ fn is_usable_token(token: &str) -> bool {
 }
 
 /// 对应 C# `NormalizeVanity`。
-fn normalize_vanity(value: Option<&str>) -> String {
-    let value = value.unwrap_or_default();
+fn normalize_vanity(value: &str) -> String {
     let decoded = urlencoding::decode(value)
         .map(|decoded| decoded.into_owned())
         .unwrap_or_else(|_| value.to_string());
-    decoded
-        .trim()
-        .trim_start_matches('/')
-        .trim_end_matches('/')
-        .to_string()
+    decoded.trim().trim_matches('/').to_string()
 }
 
 /// 校验曲目 vanity ID 是否与预期一致，预期为空时视为匹配。
 fn vanity_matches(expected: Option<&str>, actual: Option<&str>) -> bool {
     match expected.filter(|expected| !expected.trim().is_empty()) {
-        Some(expected) => {
-            normalize_vanity(Some(expected)).eq_ignore_ascii_case(&normalize_vanity(actual))
-        }
+        Some(expected) => normalize_vanity(expected)
+            .eq_ignore_ascii_case(&normalize_vanity(actual.unwrap_or_default())),
         None => true,
     }
 }
@@ -593,6 +587,6 @@ struct RawResponse {
 impl RawResponse {
     /// HTTP 状态码是否为 2xx。
     fn is_success(&self) -> bool {
-        (200..300).contains(&self.status)
+        base_api::StatusCode::from_u16(self.status).is_ok_and(|status| status.is_success())
     }
 }

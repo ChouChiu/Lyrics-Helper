@@ -10,8 +10,8 @@ pub mod searcher;
 pub mod soda_music;
 pub mod spotify;
 
-use compare_helper::*;
 use crate::error::SearchError;
+use compare_helper::*;
 use lyrics_core::models::TrackMetadata;
 use search_result::SearchResult;
 use searcher::Searcher;
@@ -122,15 +122,34 @@ pub fn compare_track_result(track: &TrackMetadata, result: &SearchResult) -> Mat
     )
 }
 
+/// 为每条结果写入匹配等级，并按匹配度降序排序。
+pub fn rank_by_match(results: &mut [SearchResult], track: &TrackMetadata) {
+    for result in results.iter_mut() {
+        result.match_type = Some(compare_track_result(track, result));
+    }
+
+    results.sort_by_key(|result| {
+        std::cmp::Reverse(result.match_type.map_or(-1, |match_type| match_type as i32))
+    });
+}
+
+/// 把若干片段拼成搜索查询串：去掉分隔用的 ` - `，压掉多余空白。
+fn join_query(parts: [&str; 3]) -> String {
+    parts
+        .join(" ")
+        .replace(" - ", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// 根据曲目元数据构建搜索查询字符串（标题 + 艺术家 + 专辑）。
 pub fn build_search_string(track: &TrackMetadata) -> String {
-    let title = track.title.as_deref().unwrap_or("");
-    let artist = track.artist.as_deref().unwrap_or("").replace(", ", " ");
-    let album = track.album.as_deref().unwrap_or("");
-    format!("{} {} {}", title, artist, album)
-        .replace(" - ", " ")
-        .trim()
-        .to_string()
+    join_query([
+        track.title.as_deref().unwrap_or(""),
+        &track.artist.as_deref().unwrap_or("").replace(", ", " "),
+        track.album.as_deref().unwrap_or(""),
+    ])
 }
 
 /// 移除标题中的 featuring 标记（如 `(feat. xxx)` 或 ` - feat. xxx`）。
@@ -147,17 +166,13 @@ pub fn strip_feat(title: &str) -> String {
 
 /// 根据曲目元数据构建渐进式搜索查询列表（从精确到宽泛）。
 pub fn build_refinement_queries(track: &TrackMetadata) -> Vec<String> {
-    let title = track.title.as_deref().unwrap_or("");
-    let new_title = strip_feat(title);
+    let title = strip_feat(track.title.as_deref().unwrap_or(""));
     let artist = track.artist.as_deref().unwrap_or("").replace(", ", " ");
 
-    let level1 = format!("{} {}", new_title, artist)
-        .replace(" - ", " ")
-        .trim()
-        .to_string();
-    let level2 = new_title.replace(" - ", " ").trim().to_string();
-
-    vec![level1, level2]
+    vec![
+        join_query([&title, &artist, ""]),
+        join_query([&title, "", ""]),
+    ]
 }
 
 /// 使用渐进式搜索策略搜索歌词，先尝试精确匹配，失败后逐步放宽搜索条件。
@@ -173,16 +188,8 @@ pub async fn search_with_refinement(
     let mut last_error: Option<SearchError> = None;
 
     match searcher.search_for_results(track).await {
-        Ok(results) if !results.is_empty() => {
-            let mut results = results;
-            for result in &mut results {
-                result.match_type = Some(compare_track_result(track, result));
-            }
-            results.sort_by(|a, b| {
-                let a_val = a.match_type.map(|m| m as i32).unwrap_or(-1);
-                let b_val = b.match_type.map(|m| m as i32).unwrap_or(-1);
-                b_val.cmp(&a_val)
-            });
+        Ok(mut results) if !results.is_empty() => {
+            rank_by_match(&mut results, track);
             return Ok(results);
         }
         Ok(_) => {}
@@ -222,15 +229,7 @@ pub async fn search_with_refinement(
         }
     }
 
-    for result in &mut all_results {
-        result.match_type = Some(compare_track_result(track, result));
-    }
-
-    all_results.sort_by(|a, b| {
-        let a_val = a.match_type.map(|m| m as i32).unwrap_or(-1);
-        let b_val = b.match_type.map(|m| m as i32).unwrap_or(-1);
-        b_val.cmp(&a_val)
-    });
+    rank_by_match(&mut all_results, track);
 
     Ok(all_results)
 }

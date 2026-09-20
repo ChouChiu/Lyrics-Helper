@@ -5,7 +5,10 @@ use super::search_result::SearchResult;
 use super::searcher::Searcher;
 use crate::error::SearchError;
 use crate::providers::web::lrclib::api;
+use crate::providers::web::lrclib::response::SearchResultItem;
 use lyrics_core::models::TrackMetadata;
+
+use super::search_result::split_artists;
 
 /// LRCLIB 歌词搜索器。
 pub struct LRCLIBSearcher;
@@ -47,18 +50,7 @@ impl Searcher for LRCLIBSearcher {
         let duration = track.duration_ms.map(|ms| ms as f64 / 1000.0);
 
         if let Some(result) = api::get(title, artist, album, duration).await? {
-            let item = super::search_result::SearchResult {
-                searcher_type: Searchers::LRCLIB,
-                title: result.track_name,
-                artists: parse_artists(&result.artist_name),
-                album: result.album_name,
-                album_artists: None,
-                duration_ms: Some((result.duration * 1000.0) as i32),
-                match_type: None,
-                id: result.id.to_string(),
-                numeric_id: None,
-            };
-            return Ok(vec![item]);
+            return Ok(vec![to_search_result(result)]);
         }
 
         let results = api::search(title, Some(artist), album, duration).await?;
@@ -75,32 +67,17 @@ impl Searcher for LRCLIBSearcher {
     }
 }
 
-fn parse_artists(artist_str: &str) -> Vec<String> {
-    artist_str
-        .split(", ")
-        .flat_map(|s| s.split(" & "))
-        .flat_map(|s| s.split(" feat. "))
-        .flat_map(|s| s.split(" ft. "))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+fn to_search_result(item: SearchResultItem) -> SearchResult {
+    SearchResult::new(
+        Searchers::LRCLIB,
+        item.track_name,
+        split_artists(&item.artist_name),
+        item.album_name,
+        Some((item.duration * 1000.0) as i32),
+        item.id.to_string(),
+    )
 }
 
-fn map_results(
-    results: Vec<super::super::providers::web::lrclib::response::SearchResultItem>,
-) -> Vec<SearchResult> {
-    results
-        .into_iter()
-        .map(|item| SearchResult {
-            searcher_type: Searchers::LRCLIB,
-            title: item.track_name,
-            artists: parse_artists(&item.artist_name),
-            album: item.album_name,
-            album_artists: None,
-            duration_ms: Some((item.duration * 1000.0) as i32),
-            match_type: None,
-            id: item.id.to_string(),
-            numeric_id: None,
-        })
-        .collect()
+fn map_results(results: Vec<SearchResultItem>) -> Vec<SearchResult> {
+    results.into_iter().map(to_search_result).collect()
 }

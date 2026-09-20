@@ -49,19 +49,14 @@ impl Searcher for NeteaseSearcher {
         let search_results: Vec<SearchResult> = songs
             .into_iter()
             .map(|song| {
-                let artists: Vec<String> = song.artists.iter().map(|a| a.name.clone()).collect();
-
-                SearchResult {
-                    searcher_type: Searchers::Netease,
-                    title: song.name,
-                    artists,
-                    album: song.album.name,
-                    album_artists: None,
-                    duration_ms: Some(song.duration as i32),
-                    match_type: None,
-                    id: song.id.to_string(),
-                    numeric_id: None,
-                }
+                SearchResult::new(
+                    Searchers::Netease,
+                    song.name,
+                    song.artists.into_iter().map(|artist| artist.name).collect(),
+                    song.album.name,
+                    Some(song.duration as i32),
+                    song.id.to_string(),
+                )
             })
             .collect();
 
@@ -75,32 +70,32 @@ impl Searcher for NeteaseSearcher {
 /// eapi 接口不可用时再改回 web 接口。两个接口都失败时返回第一次尝试的错误——真正的失败仍是 `Err`，
 /// 「查无此歌」依旧由空列表表达。
 async fn search_response(keyword: &str) -> Result<SearchResponse, SearchError> {
-    if USE_NEW_SEARCH_FIRST.load(Ordering::Relaxed) {
-        match api::search_new(keyword).await {
-            Ok(response) => return Ok(response),
-            Err(eapi_error) => {
-                // eapi 接口不可用，改回 web 接口；web 也不可用时恢复「优先 eapi」的记忆。
-                USE_NEW_SEARCH_FIRST.store(false, Ordering::Relaxed);
-                return match search_web(keyword).await {
-                    Ok(response) => Ok(response),
-                    Err(_) => {
-                        USE_NEW_SEARCH_FIRST.store(true, Ordering::Relaxed);
-                        Err(eapi_error)
-                    }
-                };
-            }
+    let prefer_new = USE_NEW_SEARCH_FIRST.load(Ordering::Relaxed);
+
+    let first_error = match search_once(keyword, prefer_new).await {
+        Ok(response) => return Ok(response),
+        Err(error) => error,
+    };
+
+    // 首选接口在当前网络环境下不可用，记住这件事并改用另一个接口。
+    USE_NEW_SEARCH_FIRST.store(!prefer_new, Ordering::Relaxed);
+
+    match search_once(keyword, !prefer_new).await {
+        Ok(response) => Ok(response),
+        Err(_) => {
+            // 两个接口都不可用，恢复原来的偏好并返回首选接口的错误。
+            USE_NEW_SEARCH_FIRST.store(prefer_new, Ordering::Relaxed);
+            Err(first_error)
         }
     }
+}
 
-    match search_web(keyword).await {
-        Ok(response) => Ok(response),
-        Err(web_error) => {
-            USE_NEW_SEARCH_FIRST.store(true, Ordering::Relaxed);
-            match api::search_new(keyword).await {
-                Ok(response) => Ok(response),
-                Err(_) => Err(web_error),
-            }
-        }
+/// 按 `use_new` 选择 eapi 或 web 接口发起一次搜索。
+async fn search_once(keyword: &str, use_new: bool) -> Result<SearchResponse, SearchError> {
+    if use_new {
+        api::search_new(keyword).await
+    } else {
+        search_web(keyword).await
     }
 }
 
