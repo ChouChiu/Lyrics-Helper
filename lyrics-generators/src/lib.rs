@@ -2,12 +2,12 @@
 //!
 //! 支持的格式包括：LRC、QRC、KRC、YRC、Lyricify Syllable、Lyricify Lines。
 
+pub mod krc_generator;
 pub mod lrc_generator;
+pub mod lyricify_lines_generator;
+pub mod lyricify_syllable_generator;
 pub mod qrc_generator;
 pub mod yrc_generator;
-pub mod krc_generator;
-pub mod lyricify_syllable_generator;
-pub mod lyricify_lines_generator;
 
 use lyrics_core::models::*;
 
@@ -23,6 +23,28 @@ pub(crate) fn syllable_info(
         syllables.first().map(SyllableItem::start_time),
         syllables.last().map(SyllableItem::end_time),
     ))
+}
+
+/// 依次对主行与子行调用 `append`，这是各逐字格式生成器共有的结构。
+///
+/// `append` 返回该行是否输出了内容；主行没有输出（非音节行）时整行跳过，子行也不再输出。
+pub(crate) fn for_each_line_and_sub_line(
+    lyrics_data: &LyricsData,
+    mut append: impl FnMut(&LineInfo) -> bool,
+) {
+    let Some(lines) = lyrics_data.lines.as_ref() else {
+        return;
+    };
+
+    for line in lines {
+        if !append(line) {
+            continue;
+        }
+
+        if let Some(sub) = line.sub_line() {
+            append(sub);
+        }
+    }
 }
 
 /// 子歌词行的输出方式。
