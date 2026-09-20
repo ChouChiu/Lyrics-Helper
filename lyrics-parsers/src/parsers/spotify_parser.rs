@@ -102,54 +102,46 @@ fn parse_unsynced_lyrics(lyrics: &[SpotifyLyricsLine]) -> Vec<LineInfo> {
 }
 
 fn parse_synced_lyrics(lyrics: &[SpotifyLyricsLine]) -> Vec<LineInfo> {
-    let mut list = Vec::new();
+    let mut list = Vec::with_capacity(lyrics.len());
 
     for line in lyrics {
-        if let Some(ref syllables) = line.syllables {
-            if !syllables.is_empty() {
-                let mut syllable_list = Vec::new();
-                let mut char_idx = 0;
-                for syllable in syllables {
-                    let chars_count: usize = syllable.chars_count.parse().unwrap_or(0);
-                    let start_time: i32 = syllable.start_time_ms.parse().unwrap_or(0);
-                    let end_time: i32 = syllable.end_time_ms.parse().unwrap_or(0);
-                    let text = line
-                        .words
-                        .chars()
-                        .skip(char_idx)
-                        .take(chars_count)
-                        .collect();
-                    syllable_list.push(SyllableInfo::new(text, start_time, end_time));
-                    char_idx += chars_count;
-                }
-                list.push(LineInfo::new_syllable(to_syllable_items(syllable_list)));
-            } else {
-                let start_time: i32 = line.start_time_ms.parse().unwrap_or(0);
-                let end_time: i32 = line.end_time_ms.parse().unwrap_or(0);
-                if end_time != 0 {
-                    list.push(LineInfo::new_line(
-                        line.words.clone(),
-                        Some(start_time),
-                        Some(end_time),
-                    ));
-                } else {
-                    list.push(LineInfo::new_line_with_time(line.words.clone(), start_time));
-                }
-            }
-        } else {
-            let start_time: i32 = line.start_time_ms.parse().unwrap_or(0);
-            let end_time: i32 = line.end_time_ms.parse().unwrap_or(0);
-            if end_time != 0 {
-                list.push(LineInfo::new_line(
-                    line.words.clone(),
-                    Some(start_time),
-                    Some(end_time),
-                ));
-            } else {
-                list.push(LineInfo::new_line_with_time(line.words.clone(), start_time));
-            }
+        let syllables = line.syllables.as_deref().unwrap_or_default();
+        if syllables.is_empty() {
+            list.push(parse_line_synced_line(line));
+            continue;
         }
+
+        let mut syllable_list = Vec::with_capacity(syllables.len());
+        let mut char_idx = 0;
+        for syllable in syllables {
+            let chars_count: usize = syllable.chars_count.parse().unwrap_or(0);
+            let text = line
+                .words
+                .chars()
+                .skip(char_idx)
+                .take(chars_count)
+                .collect();
+            syllable_list.push(SyllableInfo::new(
+                text,
+                syllable.start_time_ms.parse().unwrap_or(0),
+                syllable.end_time_ms.parse().unwrap_or(0),
+            ));
+            char_idx += chars_count;
+        }
+        list.push(LineInfo::new_syllable(to_syllable_items(syllable_list)));
     }
 
     list
+}
+
+/// 没有音节信息时按行同步处理：缺少结束时间的行只保留开始时间。
+fn parse_line_synced_line(line: &SpotifyLyricsLine) -> LineInfo {
+    let start_time: i32 = line.start_time_ms.parse().unwrap_or(0);
+    let end_time: i32 = line.end_time_ms.parse().unwrap_or(0);
+
+    if end_time != 0 {
+        LineInfo::new_line(line.words.clone(), Some(start_time), Some(end_time))
+    } else {
+        LineInfo::new_line_with_time(line.words.clone(), start_time)
+    }
 }

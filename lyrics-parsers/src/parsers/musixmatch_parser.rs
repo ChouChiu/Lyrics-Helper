@@ -25,6 +25,43 @@ pub struct RichSyncWord {
     pub position: f64,
 }
 
+/// 按路径逐级取值，等价于一串 `get`。
+fn dig<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    path.iter().try_fold(value, |value, key| value.get(key))
+}
+
+/// 宏调用是否返回了业务状态码 200。
+fn is_ok(call: Option<&Value>) -> bool {
+    call.and_then(|call| dig(call, &["message", "header", "status_code"]))
+        .and_then(Value::as_i64)
+        == Some(200)
+}
+
+/// 取宏调用响应体里指定路径上的字符串。
+fn call_str<'a>(call: Option<&'a Value>, path: &[&str]) -> Option<&'a str> {
+    let body = dig(call?, &["message", "body"])?;
+    dig(body, path)?.as_str()
+}
+
+/// 构造一份只有歌词行的 [`LyricsData`]。
+fn lyrics_data(lines: Vec<LineInfo>, sync_types: SyncTypes, language: Option<&str>) -> LyricsData {
+    let mut metadata = TrackMetadata::new();
+    if let Some(language) = language {
+        metadata.language = Some(vec![language.to_string()]);
+    }
+
+    LyricsData {
+        file: Some(FileInfo {
+            lyrics_type: LyricsTypes::Musixmatch,
+            sync_types,
+            additional_info: None,
+        }),
+        lines: Some(lines),
+        track_metadata: Some(metadata),
+        writers: None,
+    }
+}
+
 /// 解析 Musixmatch JSON 格式歌词，按优先级尝试 richsync、subtitles 和 unsynced，返回 [`LyricsData`]。
 pub fn parse(raw_json: &str) -> Option<LyricsData> {
     parse_inner(raw_json, false)
@@ -34,150 +71,88 @@ pub fn parse(raw_json: &str) -> Option<LyricsData> {
 ///
 /// `ignore_syllable` 为 `true` 时跳过 richsync 解析，直接尝试 subtitles。
 pub fn parse_inner(raw_json: &str, ignore_syllable: bool) -> Option<LyricsData> {
-    let json_obj: Value = serde_json::from_str(raw_json).ok()?;
-    let calls = json_obj.get("message")?.get("body")?.get("macro_calls")?;
+    let json: Value = serde_json::from_str(raw_json).ok()?;
+    let calls = dig(&json, &["message", "body", "macro_calls"])?;
 
-    fn check_header_200(obj: Option<&Value>) -> bool {
-        obj.and_then(|o| o.get("message"))
-            .and_then(|m| m.get("header"))
-            .and_then(|h| h.get("status_code"))
-            .and_then(|s| s.as_i64())
-            == Some(200)
+    if !ignore_syllable && let Some(data) = parse_richsync(calls.get("track.richsync.get")) {
+        return Some(data);
     }
 
-    // Try richsync first
-    if !ignore_syllable {
-        let track_get = calls.get("track.richsync.get");
-        if check_header_200(track_get) {
-            let richsync_body = track_get
-                .and_then(|t| t.get("message"))
-                .and_then(|m| m.get("body"))
-                .and_then(|b| b.get("richsync"))
-                .and_then(|r| r.get("richsync_body"))
-                .and_then(|r| r.as_str());
+    parse_subtitles(calls.get("track.subtitles.get"))
+        .or_else(|| parse_unsynced(calls.get("track.lyrics.get")))
+}
 
-            if let Some(lyrics_str) = richsync_body {
-                if let Ok(list) = serde_json::from_str::<Vec<RichSyncedLine>>(lyrics_str) {
-                    let mut lines = Vec::new();
-                    for line in &list {
-                        let mut syllables = Vec::new();
-                        let start = (line.time_start * 1000.0) as i32;
-                        for i in 0..line.words.len() {
-                            let end_time = if i + 1 < line.words.len() {
-                                start + (line.words[i + 1].position * 1000.0) as i32
-                            } else {
-                                (line.time_end * 1000.0) as i32
-                            };
-                            syllables.push(SyllableInfo::new(
-                                line.words[i].chars.clone(),
-                                start + (line.words[i].position * 1000.0) as i32,
-                                end_time,
-                            ));
-                        }
-                        lines.push(LineInfo::new_syllable(to_syllable_items(syllables)));
-                    }
-
-                    let language = track_get
-                        .and_then(|t| t.get("message"))
-                        .and_then(|m| m.get("body"))
-                        .and_then(|b| b.get("richsync"))
-                        .and_then(|r| r.get("richssync_language").or(r.get("richsync_language")))
-                        .and_then(|l| l.as_str())
-                        .map(|s| s.to_string());
-
-                    let mut metadata = TrackMetadata::new();
-                    if let Some(lang) = language {
-                        metadata.language = Some(vec![lang]);
-                    }
-
-                    return Some(LyricsData {
-                        file: Some(FileInfo {
-                            lyrics_type: LyricsTypes::Musixmatch,
-                            sync_types: SyncTypes::SyllableSynced,
-                            additional_info: None,
-                        }),
-                        lines: Some(lines),
-                        track_metadata: Some(metadata),
-                        writers: None,
-                    });
-                }
-            }
-        }
+/// 逐音节同步（richsync）：每个词带一个相对行首的偏移量。
+fn parse_richsync(call: Option<&Value>) -> Option<LyricsData> {
+    if !is_ok(call) {
+        return None;
     }
 
-    // Try subtitles
-    let track_get = calls.get("track.subtitles.get");
-    if check_header_200(track_get) {
-        let subtitle_list = track_get
-            .and_then(|t| t.get("message"))
-            .and_then(|m| m.get("body"))
-            .and_then(|b| b.get("subtitle_list"))
-            .and_then(|s| s.as_array());
+    let body = call_str(call, &["richsync", "richsync_body"])?;
+    let list: Vec<RichSyncedLine> = serde_json::from_str(body).ok()?;
 
-        if let Some(list) = subtitle_list {
-            if !list.is_empty() {
-                let subtitle_body = list[0]
-                    .get("subtitle")
-                    .and_then(|s| s.get("subtitle_body"))
-                    .and_then(|s| s.as_str());
-
-                if let Some(subtitle) = subtitle_body {
-                    let lines = lrc_parser::parse_lyrics(subtitle);
-                    let language = list[0]
-                        .get("subtitle")
-                        .and_then(|s| s.get("subtitle_language"))
-                        .and_then(|s| s.as_str())
-                        .map(|s| s.to_string());
-
-                    let mut metadata = TrackMetadata::new();
-                    if let Some(lang) = language {
-                        metadata.language = Some(vec![lang]);
-                    }
-
-                    return Some(LyricsData {
-                        file: Some(FileInfo {
-                            lyrics_type: LyricsTypes::Musixmatch,
-                            sync_types: SyncTypes::LineSynced,
-                            additional_info: None,
-                        }),
-                        lines: Some(lines),
-                        track_metadata: Some(metadata),
-                        writers: None,
-                    });
-                }
-            }
-        }
-    }
-
-    // Try lyrics (unsynced)
-    let track_get = calls.get("track.lyrics.get");
-    if check_header_200(track_get) {
-        let lyrics_body = track_get
-            .and_then(|t| t.get("message"))
-            .and_then(|m| m.get("body"))
-            .and_then(|b| b.get("lyrics"))
-            .and_then(|l| l.get("lyrics_body"))
-            .and_then(|l| l.as_str());
-
-        if let Some(lyrics) = lyrics_body {
-            let lines: Vec<LineInfo> = lyrics
-                .trim()
-                .lines()
-                .map(|line| LineInfo::new_line_simple(line.to_string()))
+    let lines = list
+        .iter()
+        .map(|line| {
+            let start = (line.time_start * 1000.0) as i32;
+            let syllables: Vec<SyllableInfo> = line
+                .words
+                .iter()
+                .enumerate()
+                .map(|(index, word)| {
+                    let end_time = match line.words.get(index + 1) {
+                        Some(next) => start + (next.position * 1000.0) as i32,
+                        None => (line.time_end * 1000.0) as i32,
+                    };
+                    SyllableInfo::new(
+                        word.chars.clone(),
+                        start + (word.position * 1000.0) as i32,
+                        end_time,
+                    )
+                })
                 .collect();
+            LineInfo::new_syllable(to_syllable_items(syllables))
+        })
+        .collect();
 
-            return Some(LyricsData {
-                file: Some(FileInfo {
-                    lyrics_type: LyricsTypes::Musixmatch,
-                    sync_types: SyncTypes::Unsynced,
-                    additional_info: None,
-                }),
-                lines: Some(lines),
-                track_metadata: Some(TrackMetadata::new()),
-                writers: None,
-            });
-        }
+    // 上游两种拼写都出现过，任取其一。
+    let language = call_str(call, &["richsync", "richssync_language"])
+        .or_else(|| call_str(call, &["richsync", "richsync_language"]));
+
+    Some(lyrics_data(lines, SyncTypes::SyllableSynced, language))
+}
+
+/// 行同步字幕：正文本身就是 LRC。
+fn parse_subtitles(call: Option<&Value>) -> Option<LyricsData> {
+    if !is_ok(call) {
+        return None;
     }
 
-    None
+    // `subtitle_list` 是数组，只取第一条字幕。
+    let subtitle = dig(call?, &["message", "body", "subtitle_list"])?
+        .get(0)?
+        .get("subtitle")?;
+    let body = subtitle.get("subtitle_body")?.as_str()?;
+
+    Some(lyrics_data(
+        lrc_parser::parse_lyrics(body),
+        SyncTypes::LineSynced,
+        subtitle.get("subtitle_language").and_then(Value::as_str),
+    ))
+}
+
+/// 无时间信息的纯文本歌词。
+fn parse_unsynced(call: Option<&Value>) -> Option<LyricsData> {
+    if !is_ok(call) {
+        return None;
+    }
+
+    let body = call_str(call, &["lyrics", "lyrics_body"])?;
+    let lines = body
+        .trim()
+        .lines()
+        .map(|line| LineInfo::new_line_simple(line.to_string()))
+        .collect();
+
+    Some(lyrics_data(lines, SyncTypes::Unsynced, None))
 }

@@ -1,5 +1,5 @@
-use lyrics_core::models::*;
 use crate::parsers::attributes_helper;
+use lyrics_core::models::*;
 
 /// 解析 Lyricify Lines 格式歌词（行同步），返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
@@ -16,7 +16,10 @@ pub fn parse(input: &str) -> LyricsData {
         writers: None,
     };
 
-    let offset = attributes_helper::parse_general_attributes_to_lyrics_data_from_lines(&mut data, &mut lyrics_lines);
+    let offset = attributes_helper::parse_general_attributes_to_lyrics_data_from_lines(
+        &mut data,
+        &mut lyrics_lines,
+    );
     let lines = parse_lyrics(&lyrics_lines, offset);
     data.lines = Some(lines);
     data

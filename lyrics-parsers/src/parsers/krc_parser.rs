@@ -2,6 +2,7 @@ use crate::parsers::attributes_helper;
 use base64::Engine;
 use lyrics_core::models::*;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 /// 酷狗 KRC 翻译数据的顶层结构。
 #[derive(Debug, Deserialize)]
@@ -37,39 +38,7 @@ pub fn parse(input: &str) -> LyricsData {
         &mut lyrics_lines,
     );
     let mut lyrics = parse_lyrics_from_lines(&lyrics_lines, offset);
-
-    if check_krc_translation(input) {
-        if let Some(lyrics_trans) = get_translation_from_krc(input) {
-            for i in 0..lyrics.len().min(lyrics_trans.len()) {
-                let t = if lyrics_trans[i] != "//" {
-                    lyrics_trans[i].clone()
-                } else {
-                    String::new()
-                };
-                if let LineInfo::Syllable {
-                    syllables,
-                    alignment,
-                    sub_line,
-                } = &lyrics[i]
-                {
-                    let syllables = syllables.clone();
-                    let alignment = *alignment;
-                    let sub_line = sub_line.clone();
-                    let mut translations = std::collections::HashMap::new();
-                    if !t.is_empty() {
-                        translations.insert("zh".to_string(), t);
-                    }
-                    lyrics[i] = LineInfo::FullSyllable {
-                        syllables,
-                        alignment,
-                        sub_line,
-                        translations,
-                        pronunciation: None,
-                    };
-                }
-            }
-        }
-    }
+    apply_translations(&mut lyrics, input);
 
     data.lines = Some(lyrics);
     data
@@ -79,41 +48,34 @@ pub fn parse(input: &str) -> LyricsData {
 pub fn parse_lyrics(input: &str) -> Vec<LineInfo> {
     let lyrics_lines = get_splited_krc_without_info_line(input);
     let mut lyrics = parse_lyrics_from_lines(&lyrics_lines, None);
-
-    if check_krc_translation(input) {
-        if let Some(lyrics_trans) = get_translation_from_krc(input) {
-            for i in 0..lyrics.len().min(lyrics_trans.len()) {
-                let t = if lyrics_trans[i] != "//" {
-                    lyrics_trans[i].clone()
-                } else {
-                    String::new()
-                };
-                if let LineInfo::Syllable {
-                    syllables,
-                    alignment,
-                    sub_line,
-                } = &lyrics[i]
-                {
-                    let syllables = syllables.clone();
-                    let alignment = *alignment;
-                    let sub_line = sub_line.clone();
-                    let mut translations = std::collections::HashMap::new();
-                    if !t.is_empty() {
-                        translations.insert("zh".to_string(), t);
-                    }
-                    lyrics[i] = LineInfo::FullSyllable {
-                        syllables,
-                        alignment,
-                        sub_line,
-                        translations,
-                        pronunciation: None,
-                    };
-                }
-            }
-        }
-    }
+    apply_translations(&mut lyrics, input);
 
     lyrics
+}
+
+/// 把 KRC 内嵌的逐行翻译合并进音节行，使其升级为 [`LineInfo::FullSyllable`]。
+///
+/// 占位符 `"//"` 与空字符串表示该行没有翻译，此时仍升级为 Full 变体但翻译为空，
+/// 与上游 `KrcParser` 一致。
+fn apply_translations(lyrics: &mut [LineInfo], input: &str) {
+    let Some(translations) = get_translation_from_krc(input) else {
+        return;
+    };
+
+    for (line, text) in lyrics.iter_mut().zip(translations) {
+        if !matches!(line, LineInfo::Syllable { .. }) {
+            continue;
+        }
+
+        let mut map = HashMap::new();
+        if !text.is_empty() && text != "//" {
+            map.insert("zh".to_string(), text);
+        }
+
+        // 原地换变体：先取出整行，避免深拷贝音节与子行。
+        let owned = std::mem::replace(line, LineInfo::new_line_simple(String::new()));
+        *line = owned.to_full_syllable(map, None);
+    }
 }
 
 /// 从预分割的 KRC 歌词行列表解析歌词，可选地应用时间偏移。
@@ -137,44 +99,26 @@ pub fn parse_lyrics_from_lines(lyrics_lines: &[String], offset: Option<i32>) -> 
     lyrics
 }
 
+/// 按 KRC 的换行约定切分文本：`\r\n` 视作换行，单独的 `\r` 直接丢弃。
+fn split_lines(krc: &str) -> impl Iterator<Item = &str> {
+    krc.split('\n').map(|line| line.trim_end_matches('\r'))
+}
+
 /// 将 KRC 原始文本按行分割，仅保留以 `[` 开头的有效歌词行。
 pub fn get_splited_krc(krc: &str) -> Vec<String> {
-    let binding = krc.replace("\r\n", "\n").replace('\r', "");
-    let lines: Vec<&str> = binding.split('\n').collect();
-    let mut result = String::new();
-    for line in lines {
-        if line.starts_with('[') {
-            result.push_str(line);
-            result.push('\n');
-        }
-    }
-    result
-        .replace("\r\n", "\n")
-        .replace('\r', "")
-        .split('\n')
-        .map(|s| s.to_string())
+    split_lines(krc)
+        .filter(|line| line.starts_with('['))
+        .map(str::to_string)
         .collect()
 }
 
 /// 将 KRC 原始文本按行分割，仅保留带时间戳的歌词行（不含属性信息行）。
 pub fn get_splited_krc_without_info_line(krc: &str) -> Vec<String> {
-    let binding = krc.replace("\r\n", "\n").replace('\r', "");
-    let lines: Vec<&str> = binding.split('\n').collect();
-    let mut result = String::new();
-    for line in lines {
-        if line.starts_with('[') && line.len() >= 5 {
-            let second_char = line.chars().nth(1).unwrap_or(' ');
-            if second_char.is_ascii_digit() {
-                result.push_str(line);
-                result.push('\n');
-            }
-        }
-    }
-    result
-        .replace("\r\n", "\n")
-        .replace('\r', "")
-        .split('\n')
-        .map(|s| s.to_string())
+    split_lines(krc)
+        .filter(|line| {
+            line.len() >= 5 && line.starts_with('[') && line.as_bytes()[1].is_ascii_digit()
+        })
+        .map(str::to_string)
         .collect()
 }
 
@@ -231,80 +175,36 @@ pub fn parse_lyrics_line(line: &str) -> Option<LineInfo> {
 
 /// 检查 KRC 歌词是否包含翻译内容（通过 base64 编码的 `[language]` 标签）。
 pub fn check_krc_translation(krc: &str) -> bool {
-    if !krc.contains("[language:") {
-        return false;
-    }
-
-    let Some(start_pos) = krc.find("[language:") else {
-        return false;
-    };
-    let start = start_pos + "[language:".len();
-    let Some(end_pos) = krc[start..].find(']') else {
-        return false;
-    };
-    let end = end_pos + start;
-    let language = &krc[start..end];
-
-    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(language) else {
-        return false;
-    };
-    let Ok(decode) = String::from_utf8(decoded) else {
-        return false;
-    };
-    let Ok(translation) = serde_json::from_str::<KugouTranslation>(&decode) else {
-        return false;
-    };
-
-    translation.content.as_ref().is_some_and(|c| !c.is_empty())
-}
-
-/// 从 KRC 歌词中提取翻译文本列表（逐行翻译）。
-pub fn get_translation_from_krc(krc: &str) -> Option<Vec<String>> {
-    if !krc.contains("[language:") {
-        return None;
-    }
-
-    let start = krc.find("[language:")? + "[language:".len();
-    let end = krc[start..].find(']')? + start;
-    let language = &krc[start..end];
-
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(language)
-        .ok()?;
-    let decode = String::from_utf8(decoded).ok()?;
-    let translation: KugouTranslation = serde_json::from_str(&decode).ok()?;
-
-    let content = translation.content?;
-    if content.is_empty() {
-        return None;
-    }
-
-    let content_item = content.iter().find(|c| c.content_type == 1)?;
-    let lyric_content = content_item.lyric_content.as_ref()?;
-
-    let mut result = Vec::new();
-    for lines in lyric_content.iter().flatten() {
-        if let Some(first) = lines.first() {
-            result.push(first.clone());
-        }
-    }
-
-    Some(result)
+    get_translation_raw_from_krc(krc)
+        .and_then(|translation| translation.content)
+        .is_some_and(|content| !content.is_empty())
 }
 
 /// 从 KRC 歌词中提取原始翻译结构体 [`KugouTranslation`]。
 pub fn get_translation_raw_from_krc(krc: &str) -> Option<KugouTranslation> {
-    if !krc.contains("[language:") {
-        return None;
-    }
-
     let start = krc.find("[language:")? + "[language:".len();
     let end = krc[start..].find(']')? + start;
-    let language = &krc[start..end];
 
     let decoded = base64::engine::general_purpose::STANDARD
-        .decode(language)
+        .decode(&krc[start..end])
         .ok()?;
-    let decode = String::from_utf8(decoded).ok()?;
-    serde_json::from_str(&decode).ok()
+    let decoded = String::from_utf8(decoded).ok()?;
+
+    serde_json::from_str(&decoded).ok()
+}
+
+/// 从 KRC 歌词中提取翻译文本列表（逐行翻译）。
+pub fn get_translation_from_krc(krc: &str) -> Option<Vec<String>> {
+    let content = get_translation_raw_from_krc(krc)?.content?;
+    let content_item = content.iter().find(|item| item.content_type == 1)?;
+
+    Some(
+        content_item
+            .lyric_content
+            .as_ref()?
+            .iter()
+            .flatten()
+            .filter_map(|lines| lines.first().cloned())
+            .collect(),
+    )
 }

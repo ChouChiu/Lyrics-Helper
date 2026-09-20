@@ -1,6 +1,11 @@
 use crate::parsers::attributes_helper;
 use lyrics_core::models::*;
 use regex::Regex;
+use std::sync::LazyLock;
+
+/// 逐字时间片段：`文本(开始时间,时长)`，与 QRC 的片段格式相同。
+static SYLLABLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(.*?)\((\d+),(\d+)\)").unwrap());
 
 /// 解析 Lyricify Syllable 格式歌词，支持背景人声检测和对齐信息，返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
@@ -49,7 +54,6 @@ pub fn parse_lyrics(lines: &[String], offset: Option<i32>) -> Vec<LineInfo> {
 }
 
 fn parse_lyrics_line_with_state(line: &str) -> Option<(LineInfo, Option<bool>)> {
-    let re = Regex::new(r"(.*?)\((\d+),(\d+)\)").ok()?;
     let mut syllables: Vec<SyllableInfo> = Vec::new();
     let mut is_background_vocals: Option<bool> = None;
     let mut alignment = LyricsAlignment::Unspecified;
@@ -84,7 +88,7 @@ fn parse_lyrics_line_with_state(line: &str) -> Option<(LineInfo, Option<bool>)> 
         line
     };
 
-    for cap in re.captures_iter(line_to_parse) {
+    for cap in SYLLABLE_RE.captures_iter(line_to_parse) {
         if cap.len() == 4 {
             let text = cap[1].to_string();
             let start_time: i32 = cap[2].parse().ok()?;
@@ -111,9 +115,8 @@ fn set_background_vocals_info(list: Vec<(LineInfo, Option<bool>)>) -> Vec<LineIn
     let mut i = 1;
     while i < items.len() {
         if items[i].1 == Some(true) {
-            let sub_line = items[i].0.clone();
+            let (sub_line, _) = items.remove(i);
             items[i - 1].0.set_sub_line(Some(Box::new(sub_line)));
-            items.remove(i);
         } else {
             i += 1;
         }
@@ -132,9 +135,8 @@ fn set_background_vocals_info(list: Vec<(LineInfo, Option<bool>)>) -> Vec<LineIn
             && items[i].0.sub_line().is_none()
             && (i + 1 >= items.len() || is_not_bg(&items[i + 1]))
         {
-            let sub_line = items[i].0.clone();
+            let (sub_line, _) = items.remove(i);
             items[i - 1].0.set_sub_line(Some(Box::new(sub_line)));
-            items.remove(i);
         }
         i += 1;
     }

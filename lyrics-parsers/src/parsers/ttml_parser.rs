@@ -1,6 +1,6 @@
 use lyrics_core::models::*;
 use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -108,6 +108,22 @@ fn attr_value(attrs: &[(String, String)], name: &str) -> Option<String> {
     None
 }
 
+/// 取出元素的标签名与属性列表。
+fn element_head(start: &BytesStart<'_>) -> (String, Vec<(String, String)>) {
+    let name = String::from_utf8_lossy(start.name().as_ref()).to_string();
+    let attributes = start
+        .attributes()
+        .flatten()
+        .map(|attribute| {
+            (
+                String::from_utf8_lossy(attribute.key.as_ref()).to_string(),
+                String::from_utf8_lossy(&attribute.value).to_string(),
+            )
+        })
+        .collect();
+    (name, attributes)
+}
+
 fn build_tree(reader: &mut Reader<&[u8]>, end_tag: &[u8]) -> Vec<XmlNode> {
     let mut nodes = Vec::new();
     let mut buf = Vec::new();
@@ -115,17 +131,7 @@ fn build_tree(reader: &mut Reader<&[u8]>, end_tag: &[u8]) -> Vec<XmlNode> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                let attributes: Vec<(String, String)> = e
-                    .attributes()
-                    .flatten()
-                    .map(|a| {
-                        (
-                            String::from_utf8_lossy(a.key.as_ref()).to_string(),
-                            String::from_utf8_lossy(&a.value).to_string(),
-                        )
-                    })
-                    .collect();
+                let (name, attributes) = element_head(e);
                 let children = build_tree(reader, e.name().as_ref());
                 nodes.push(XmlNode::Element {
                     name,
@@ -134,17 +140,7 @@ fn build_tree(reader: &mut Reader<&[u8]>, end_tag: &[u8]) -> Vec<XmlNode> {
                 });
             }
             Ok(Event::Empty(ref e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                let attributes: Vec<(String, String)> = e
-                    .attributes()
-                    .flatten()
-                    .map(|a| {
-                        (
-                            String::from_utf8_lossy(a.key.as_ref()).to_string(),
-                            String::from_utf8_lossy(&a.value).to_string(),
-                        )
-                    })
-                    .collect();
+                let (name, attributes) = element_head(e);
                 nodes.push(XmlNode::Element {
                     name,
                     attributes,
@@ -180,25 +176,27 @@ pub fn parse(ttml: &str) -> LyricsData {
 /// 解析 TTML 歌词，`use_embedded_simplified_chinese_lyrics` 控制是否优先采用内嵌的简体中文转换：
 /// 为 `false` 且原文为繁体中文（zh-Hant）时，保留原文语言并忽略内嵌的简体中文 replacement 翻译。
 pub fn parse_with_options(ttml: &str, use_embedded_simplified_chinese_lyrics: bool) -> LyricsData {
+    let mut file = FileInfo {
+        lyrics_type: LyricsTypes::Ttml,
+        sync_types: SyncTypes::SyllableSynced,
+        additional_info: Some(AdditionalFileInfo::new_general()),
+    };
     let mut data = LyricsData {
         track_metadata: Some(TrackMetadata::new()),
-        file: Some(FileInfo {
-            lyrics_type: LyricsTypes::Ttml,
-            sync_types: SyncTypes::SyllableSynced,
-            additional_info: Some(AdditionalFileInfo::new_general()),
-        }),
+        file: None,
         lines: Some(Vec::new()),
         writers: None,
     };
 
     if ttml.trim().is_empty() {
+        data.file = Some(file);
         return data;
     }
 
     let mut reader = Reader::from_str(ttml);
     let doc = build_tree(&mut reader, b"");
 
-    parse_itunes_metadata(&doc, &mut data);
+    parse_itunes_metadata(&doc, &mut file, &mut data);
     let translations = parse_translations(&doc);
     let agents = parse_agents(&doc);
     let mut agent_alignment = AgentAlignmentState::new(agents);
@@ -226,6 +224,7 @@ pub fn parse_with_options(ttml: &str, use_embedded_simplified_chinese_lyrics: bo
         alignments[index] = agent_alignment.get_alignment(agent_id.as_deref());
     }
 
+    let mut lines: Vec<LineInfo> = Vec::with_capacity(p_nodes.len());
     let mut any_line_synced = false;
     let mut any_syllable_synced = false;
 
@@ -309,19 +308,18 @@ pub fn parse_with_options(ttml: &str, use_embedded_simplified_chinese_lyrics: bo
             }
         }
 
-        data.lines.as_mut().unwrap().push(line);
+        lines.push(line);
     }
 
-    if any_line_synced && any_syllable_synced {
-        data.file.as_mut().unwrap().sync_types = SyncTypes::MixedSynced;
-    } else if any_line_synced {
-        data.file.as_mut().unwrap().sync_types = SyncTypes::LineSynced;
-    } else if any_syllable_synced {
-        data.file.as_mut().unwrap().sync_types = SyncTypes::SyllableSynced;
-    } else {
-        data.file.as_mut().unwrap().sync_types = SyncTypes::Unknown;
-    }
+    file.sync_types = match (any_line_synced, any_syllable_synced) {
+        (true, true) => SyncTypes::MixedSynced,
+        (true, false) => SyncTypes::LineSynced,
+        (false, true) => SyncTypes::SyllableSynced,
+        (false, false) => SyncTypes::Unknown,
+    };
 
+    data.lines = Some(lines);
+    data.file = Some(file);
     data
 }
 
@@ -378,11 +376,7 @@ fn collect_syllables_from_nodes(
     for node in nodes {
         match node {
             XmlNode::Text(text) => {
-                if is_bg_context {
-                    append_to_previous(text, bg);
-                } else {
-                    append_to_previous(text, main);
-                }
+                append_to_previous(text, if is_bg_context { &mut *bg } else { &mut *main });
             }
             XmlNode::Element {
                 name,
@@ -404,17 +398,13 @@ fn collect_syllables_from_nodes(
                             .or(begin_ms);
 
                         if let Some(b) = begin_ms {
-                            let mut raw = normalize_text(&element_text_value(children));
-                            if is_bg {
-                                raw = move_leading_spaces_to_previous(&raw, bg);
-                                if !raw.is_empty() {
-                                    bg.push(SyllableInfo::new(raw, b, end_ms.unwrap_or(b)));
-                                }
-                            } else {
-                                raw = move_leading_spaces_to_previous(&raw, main);
-                                if !raw.is_empty() {
-                                    main.push(SyllableInfo::new(raw, b, end_ms.unwrap_or(b)));
-                                }
+                            let target = if is_bg { &mut *bg } else { &mut *main };
+                            let raw = move_leading_spaces_to_previous(
+                                &normalize_text(&element_text_value(children)),
+                                target,
+                            );
+                            if !raw.is_empty() {
+                                target.push(SyllableInfo::new(raw, b, end_ms.unwrap_or(b)));
                             }
                         }
                     } else {
@@ -429,27 +419,24 @@ fn collect_syllables_from_nodes(
 }
 
 fn append_to_previous(text: &str, list: &mut [SyllableInfo]) {
-    if text.is_empty() || list.is_empty() {
+    let Some(last) = list.last_mut() else {
         return;
-    }
-    let normalized = normalize_text(text);
-    if normalized.is_empty() {
-        return;
-    }
-    list.last_mut().unwrap().text.push_str(&normalized);
+    };
+    last.text.push_str(&normalize_text(text));
 }
 
 fn move_leading_spaces_to_previous(text: &str, list: &mut [SyllableInfo]) -> String {
-    if text.is_empty() || list.is_empty() {
-        return text.to_string();
-    }
     let trimmed = text.trim_start();
-    let leading_len = text.len() - trimmed.len();
-    if leading_len == 0 {
-        return text.to_string();
+    let leading = &text[..text.len() - trimmed.len()];
+
+    if !leading.is_empty()
+        && let Some(last) = list.last_mut()
+    {
+        last.text.push_str(leading);
+        return trimmed.to_string();
     }
-    list.last_mut().unwrap().text.push_str(&text[..leading_len]);
-    trimmed.to_string()
+
+    text.to_string()
 }
 
 fn parse_agents(nodes: &[XmlNode]) -> Vec<Agent> {
@@ -513,7 +500,7 @@ fn get_line_start_time(node: &XmlNode) -> Option<i32> {
         .min()
 }
 
-fn parse_itunes_metadata(doc: &[XmlNode], data: &mut LyricsData) {
+fn parse_itunes_metadata(doc: &[XmlNode], file: &mut FileInfo, data: &mut LyricsData) {
     let metadata = find_first_element(doc, "metadata");
     let meta = find_first_element(doc, "iTunesMetadata");
 
@@ -533,14 +520,11 @@ fn parse_itunes_metadata(doc: &[XmlNode], data: &mut LyricsData) {
         _ => return,
     };
 
-    if let Some(leading) = attr_value(meta_attrs, "leadingSilence") {
-        if !leading.trim().is_empty() {
-            if let Some(AdditionalFileInfo::General { attributes }) =
-                data.file.as_mut().unwrap().additional_info.as_mut()
-            {
-                attributes.push(("leadingSilence".to_string(), leading));
-            }
-        }
+    if let Some(leading) = attr_value(meta_attrs, "leadingSilence")
+        && !leading.trim().is_empty()
+        && let Some(AdditionalFileInfo::General { attributes }) = file.additional_info.as_mut()
+    {
+        attributes.push(("leadingSilence".to_string(), leading));
     }
 
     let writers: Vec<String> = find_elements(meta_children, "songwriter")
@@ -733,7 +717,9 @@ fn descendants_and_self(node: &XmlNode) -> Vec<&XmlNode> {
 
 fn parse_metadata_duration(roots: &[&XmlNode]) -> Option<i32> {
     for key in &["durationMs", "durationInMillis", "duration", "length"] {
-        let value = find_metadata_value(roots, &[key])?;
+        let Some(value) = find_metadata_value(roots, &[key]) else {
+            continue;
+        };
         let trimmed = value.trim();
         if trimmed.is_empty() {
             continue;
@@ -876,16 +862,16 @@ fn normalize_lang_key(lang: &str) -> String {
 }
 
 fn normalize_bracket_inner_spacing_for_bg(syllables: &mut [SyllableInfo]) {
-    if syllables.is_empty() {
-        return;
+    if let Some(first) = syllables.first_mut() {
+        first.text = OPEN_BRACKET_SPACE_RE
+            .replace_all(&first.text, "$1")
+            .to_string();
     }
-    let first = &mut syllables[0].text;
-    *first = OPEN_BRACKET_SPACE_RE.replace_all(first, "$1").to_string();
-
-    let last = syllables.last_mut().unwrap();
-    last.text = CLOSE_BRACKET_SPACE_RE
-        .replace_all(&last.text, "$1")
-        .to_string();
+    if let Some(last) = syllables.last_mut() {
+        last.text = CLOSE_BRACKET_SPACE_RE
+            .replace_all(&last.text, "$1")
+            .to_string();
+    }
 }
 
 fn extract_timed_span_texts(nodes: &[XmlNode]) -> Vec<String> {
@@ -924,23 +910,11 @@ fn replace_syllable_line_parts(
         .iter()
         .zip(new_parts.iter())
         .map(|(syllable, new_part)| {
-            let leading: String = syllable
-                .text
-                .chars()
-                .take_while(|c| c.is_whitespace())
-                .collect();
-            let trailing: String = syllable
-                .text
-                .chars()
-                .rev()
-                .take_while(|c| c.is_whitespace())
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
-            let replacement = normalize_text(new_part);
+            let text = syllable.text.as_str();
+            let leading = &text[..text.len() - text.trim_start().len()];
+            let trailing = &text[text.trim_end().len()..];
             SyllableInfo::new(
-                format!("{}{}{}", leading, replacement, trailing),
+                format!("{}{}{}", leading, normalize_text(new_part), trailing),
                 syllable.start_time,
                 syllable.end_time,
             )
@@ -1183,15 +1157,14 @@ fn split_subtitle_by_parentheses(value: &str) -> (String, Option<String>) {
     let value = normalize_text(value);
     match BRACKET_CONTENT_RE.captures(&value) {
         Some(caps) => {
-            let inner = if let Some(m) = caps.get(1) {
-                m.as_str()
-            } else if let Some(m) = caps.get(2) {
-                m.as_str()
-            } else {
-                ""
-            };
+            let inner = caps
+                .get(1)
+                .or_else(|| caps.get(2))
+                .map_or("", |m| m.as_str());
             let inner = normalize_spaces(inner);
-            let m = caps.get(0).unwrap();
+            let Some(m) = caps.get(0) else {
+                return (normalize_spaces(&value), None);
+            };
             let mut main = value.clone();
             main.replace_range(m.start()..m.end(), "");
             let main = normalize_spaces(&main);
@@ -1207,11 +1180,7 @@ fn split_subtitle_by_parentheses(value: &str) -> (String, Option<String>) {
 
 fn parse_time_ms(value: &str) -> Option<i32> {
     let value = value.trim();
-    let value = if value.ends_with('s') || value.ends_with('S') {
-        &value[..value.len() - 1]
-    } else {
-        value
-    };
+    let value = value.strip_suffix(['s', 'S']).unwrap_or(value);
 
     if value.contains(':') {
         let parts: Vec<&str> = value.split(':').collect();
@@ -1237,5 +1206,44 @@ fn parse_time_ms(value: &str) -> Option<i32> {
     } else {
         let seconds: f64 = value.parse().ok()?;
         Some((seconds * 1000.0).round() as i32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 时长的候选键要逐个尝试：靠前的键取不到值，不能让后面的键失去机会。
+    #[test]
+    fn duration_falls_back_to_later_metadata_keys() {
+        let ttml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml">
+  <head><metadata><meta key="durationInMillis" value="185000"/></metadata></head>
+  <body><div><p begin="1.0" end="4.0">Hello</p></div></body>
+</tt>"#;
+
+        let data = parse(ttml);
+        let duration = data
+            .track_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.duration_ms);
+        assert_eq!(duration, Some(185000));
+    }
+
+    /// `body@dur` 优先于元数据里的时长。
+    #[test]
+    fn body_duration_wins_over_metadata() {
+        let ttml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml">
+  <head><metadata><meta key="durationInMillis" value="185000"/></metadata></head>
+  <body dur="200.5"><div><p begin="1.0" end="4.0">Hello</p></div></body>
+</tt>"#;
+
+        let data = parse(ttml);
+        let duration = data
+            .track_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.duration_ms);
+        assert_eq!(duration, Some(200_500));
     }
 }
