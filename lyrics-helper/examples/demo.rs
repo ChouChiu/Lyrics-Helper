@@ -79,7 +79,9 @@ fn print_usage() {
     println!("  parsers-demo                  Run all parser demos");
     println!("  generators-demo               Run generator demos");
     println!();
-    println!("Formats: lrc, qrc, yrc, krc, ttml, spotify, musixmatch, lyricify-syllable, lyricify-lines");
+    println!(
+        "Formats: lrc, qrc, yrc, krc, ttml, spotify, musixmatch, lyricify-syllable, lyricify-lines"
+    );
 }
 
 fn parse_format(format: &str) -> lyrics_helper::LyricsRawTypes {
@@ -179,12 +181,10 @@ fn cmd_generate(file_path: &str, from_format: &str, to_format: &str) {
     }
 
     match lyrics_helper::parse(&content, raw_type) {
-        Some(data) => {
-            match lyrics_helper::generate_string(&data, gen_type) {
-                Some(output) => println!("{}", output),
-                None => eprintln!("Failed to generate output"),
-            }
-        }
+        Some(data) => match lyrics_helper::generate_string(&data, gen_type) {
+            Some(output) => println!("{}", output),
+            None => eprintln!("Failed to generate output"),
+        },
         None => {
             eprintln!("Failed to parse input lyrics");
         }
@@ -275,7 +275,10 @@ fn cmd_generators_demo() {
 
     if let Some(data) = data {
         let formats = vec![
-            ("LyricifySyllable", lyrics_helper::LyricsTypes::LyricifySyllable),
+            (
+                "LyricifySyllable",
+                lyrics_helper::LyricsTypes::LyricifySyllable,
+            ),
             ("LyricifyLines", lyrics_helper::LyricsTypes::LyricifyLines),
             ("LRC", lyrics_helper::LyricsTypes::Lrc),
             ("QRC", lyrics_helper::LyricsTypes::Qrc),
