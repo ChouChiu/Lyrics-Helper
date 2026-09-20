@@ -1,0 +1,1080 @@
+//! 从歌词文本自身的书写约定里读出对唱分边、背景和声与跨行续句。
+//!
+//! QRC、LRC、KRC、YRC 都没有「这一段是第二个声部」「这一句是背景和声」这样的字段——转录
+//! 者是把它们写进文本里的：行内括号短语是背景和声（网易云《Umbrella》开头
+//! `Ahuh Ahuh （Yea Rihanna）`），`歌手名：` 开头的行或独占一行的标签是对唱分边，逗号
+//! 结尾的行由下一行续上。这里把这三件事读出来，填进 [`LineInfo`] 本来就有的 `alignment`
+//! 与 `sub_line`。
+//!
+//! 三条约定都只认转录明写的东西：对唱标签必须点到该曲目的歌手之一，匹配不上的标签与时间
+//! 重叠都不构成第二个声部的证据；括号里要有字母或数字才是被唱出来的一句；行尾的标点与
+//! 大小写说了句子是否继续。宁可漏判，也不瞎判。
+//!
+//! # 由调用方显式调用
+//!
+//! 这些变换**不会**被任何解析器自动调用。它们改变既有格式的解析结果——文本里的括号会被
+//! 搬进 `sub_line`、只有标签的行会消失、断句的行会并成一行——自动执行就是对所有格式的
+//! 破坏性改动；它们还需要曲目的歌手列表，并且要跟其它后处理争顺序。与
+//! `helpers::optimization` 里的那些变换一样，这里是调用方按需执行的一组函数。
+//!
+//! 建议的顺序：
+//!
+//! 1. `apply_speaker_labels`——只有标签的行要赶在被丢掉之前把分边读出来，而分边决定了
+//!    后面「同一侧才合并」的判断；
+//! 2. `split_background_vocals`——要在逐词时间被合并成单词之前切开括号短语；
+//! 3. 配对翻译——这时每一行只带着自己那一行的翻译；
+//! 4. `fold_bracketed_echoes`——独占一行的括号短语先收下属于它的翻译，再并进它回答的那一行；
+//! 5. `merge_continued_lines`——最后把断句的行并成一行，连各自的翻译一起并上。
+
+use std::collections::HashMap;
+
+use crate::models::{FullSyllableInfo, LineInfo, SyllableInfo, SyllableItem};
+
+/// 括号短语最晚可以在它回答的那一行之后多久开始（毫秒）。
+///
+/// QQ 音乐通常把一句回声定在它回答的那一行唱完的时刻，但它回答的是那句话而不是那一行：
+/// 《Saddle Up》的伴唱在那一行留出的停顿之后才起，晚了一秒半。两秒足够吸收这种停顿，
+/// 又不会够到后面另一段的括号句。
+const ECHO_GAP_MS: i32 = 2_000;
+
+/// 切开一个括号短语，把它变成它所在行的背景和声。
+///
+/// QRC 与 LRC 都没有背景和声字段，有的是转录写下来的约定：伴唱写在它所回答的那一行里，
+/// 作为一段带自己时间的括号短语。网易云《Umbrella》开场是 `Ahuh Ahuh （Yea Rihanna）`，
+/// 括号本身是两个零长度的音节；《I'm In Love With a Monster》把短语写在行中间——
+/// `I'm in love (we're in love) with a monster`——两人合唱的词就站在把短语引出来的词与
+/// 接下去的词之间。两种写法都留下这一行自己的词，在短语原来的位置上接起来。
+///
+/// 规则保持很窄，因为括号本身不构成证据：短语旁边得留着唱出来的文字，短语里得有字母或
+/// 数字，而且这一行得有逐词时间。因此 `(instrumental)` 这样的旁白、整行只有一段括号的
+/// 行、只有行级时间的来源，都保留括号、仍旧是一行普通歌词。
+pub fn split_background_vocals(lines: &mut [LineInfo]) {
+    for line in lines {
+        split_background_vocal(line);
+    }
+}
+
+fn split_background_vocal(line: &mut LineInfo) {
+    if line.sub_line().is_some() || !is_word_timed(line) {
+        return;
+    }
+    let text = line.text_from_any();
+    let Some(phrase) = bracketed_phrase_in_line(&text) else {
+        return;
+    };
+
+    let before = &text[..phrase.open];
+    let after = &text[phrase.close..];
+    // 短语不是这一行显示的内容，所以它前后的词按断句的两行那样接起来：中间留出视图画词
+    // 流时的那一个空格。
+    let head_text = join_around(before, after);
+    if head_text.is_empty() {
+        return;
+    }
+
+    // 短语里的括号不会空着（`bracketed_phrase_in_line` 只收有字母或数字的），所以这里
+    // 只用管这一行还留没留下词。
+    let mut head = take_syllables(line);
+    let mut enclosed = split_syllables_at(&mut head, before.chars().count());
+    let trailing = split_syllables_at(
+        &mut enclosed,
+        text[phrase.open..phrase.close].chars().count(),
+    );
+    let background = unwrap_syllable_brackets(enclosed);
+    // 这一行的词就是短语被写在中间的那些词，短语在行尾时它后面没有词要接；这时短语前面
+    // 的分隔符留在行尾就多余了——一行的词拼起来要正好等于这一行的文字。
+    if trailing.is_empty() {
+        trim_end_of_last_word(&mut head);
+    } else {
+        join_words(&mut head, trailing);
+    }
+
+    // 短语唱在这一行里面，所以它由这一行自己的翻译覆盖，不带自己的翻译。
+    let mut sub_line = LineInfo::new_syllable(background);
+    sub_line.set_alignment(line.alignment());
+    line.set_sub_line(Some(Box::new(sub_line)));
+    set_syllables(line, head);
+}
+
+/// 把括号短语被写在中间的那段文本接起来。
+fn join_around(before: &str, after: &str) -> String {
+    match (before.trim_end(), after.trim_start()) {
+        ("", after) => after.to_string(),
+        (before, "") => before.to_string(),
+        (before, after) => format!("{before} {after}"),
+    }
+}
+
+/// 把跟在括号短语后面的词接回它前面的词上。
+///
+/// 短语后面那个空格是转录写下它的地方的单位，短语与括号共用这个词时切开会把那个词分开：
+/// `love) ` 变成 `love)` 与 ` `，那个空格两半都不属于。接回来时把它重新写上一次，因此
+/// 只装着它的那半会被丢掉，接缝两头的词去掉接缝取代掉的那些空白。
+fn join_words(head: &mut Vec<SyllableItem>, mut trailing: Vec<SyllableItem>) {
+    let separators = trailing
+        .iter()
+        .take_while(|item| !item.parts().iter().any(|part| !part.text.trim().is_empty()))
+        .count();
+    trailing.drain(..separators);
+    trim_start_of_first_word(&mut trailing);
+    trim_end_of_last_word(head);
+    continue_words(head, trailing);
+}
+
+/// 去掉包在背景和声外面的括号。
+///
+/// 括号属于这句短语，不属于唱它的那些词，因此只装着括号的词跟着括号一起消失。
+fn unwrap_syllable_brackets(mut items: Vec<SyllableItem>) -> Vec<SyllableItem> {
+    if let Some(part) = items.first_mut().and_then(first_part_mut) {
+        let mut rest = part.text.trim_start();
+        rest = rest.strip_prefix(['(', '（']).unwrap_or(rest);
+        rest = rest.trim_start();
+        let skip = part.text.len() - rest.len();
+        part.text.drain(..skip);
+    }
+    if let Some(part) = items.last_mut().and_then(last_part_mut) {
+        let mut rest = part.text.trim_end();
+        rest = rest.strip_suffix([')', '）']).unwrap_or(rest);
+        rest = rest.trim_end();
+        part.text.truncate(rest.len());
+    }
+    items.retain(|item| item.parts().iter().any(|part| !part.text.is_empty()));
+    items
+}
+
+/// 把独占一行的括号短语并进它所回答的那一行。
+///
+/// [`split_background_vocals`] 读的那一半约定：网易云把伴唱写成同一行里的尾巴，QQ 音乐则
+/// 写成独占一行的行，用括号括起来、定在它回答的那一行的时间上——《hate that i made you
+/// love me》里的 `(My way from you)` 跟在 `Know that I will find my way from you` 后面。
+/// 比一行长的短语写成连续的几行，开括号在第一行、闭括号在最后一行，《Saddle Up》就是用
+/// 这种写法把副歌重复在尾声下面；而它回答的是那句话留出的停顿之后，不总是紧接上一个词。
+///
+/// 渲染时画出来的歌词把伴唱挂在它回答的那一行上，所以这里就把两者并起来，而不是让它们
+/// 各自滚过去。回声得从它并进去的那一行内部或紧接着之后开始：歌里别处单独站着的括号句
+/// 不是随便哪一行的回答。
+pub fn fold_bracketed_echoes(lines: &mut Vec<LineInfo>) {
+    let mut index = 1;
+    while index < lines.len() {
+        let rows = if lines[index - 1].sub_line().is_none() {
+            echo_rows(lines, index)
+        } else {
+            0
+        };
+        if rows == 0 {
+            index += 1;
+            continue;
+        }
+        // 回声唱在它自己的位置上，所以它自己的翻译属于它，而不是它回答的那一行。
+        let echo: Vec<LineInfo> = lines.drain(index..index + rows).collect();
+        let alignment = lines[index - 1].alignment();
+        let mut background = echo_background(echo);
+        background.set_alignment(alignment);
+        lines[index - 1].set_sub_line(Some(Box::new(background)));
+    }
+}
+
+/// 返回从 `lines[index]` 开始的回声写成了几行。
+///
+/// 站在那里的东西不回答它前面那一行时返回 0。
+fn echo_rows(lines: &[LineInfo], index: usize) -> usize {
+    let parent = &lines[index - 1];
+    let Some(rows) = bracketed_phrase(lines, index) else {
+        return 0;
+    };
+    let phrase = &lines[index..index + rows];
+    // `(instrumental)` 这样的旁白什么都不回答。
+    if !phrase_text(phrase).chars().any(char::is_alphanumeric) {
+        return 0;
+    }
+    let answers = phrase[0].start_time().is_some_and(|start| {
+        start >= parent.start_time().unwrap_or_default()
+            && start <= latest_time_ms(parent).saturating_add(ECHO_GAP_MS)
+    });
+    // 比一行长的短语是连着唱下来的，所以歌里别处没配上的括号够不到它这里来收尾。
+    let back_to_back = phrase.windows(2).all(|rows| {
+        let (Some(start), Some(next)) = (rows[1].start_time(), rows[0].start_time()) else {
+            return false;
+        };
+        start <= latest_time_ms(&rows[0]).saturating_add(ECHO_GAP_MS) && next <= start
+    });
+    if answers && back_to_back { rows } else { 0 }
+}
+
+/// 读从 `lines[index]` 开始的那段括号短语。
+///
+/// 短语在文本以括号开头的那一行打开，在把它结束的那一行合上——独占一行时整行都在括号里，
+/// 更长时开括号在第一行、闭括号在最后一行。返回它占了几行；文本没有写出一段合上的括号时
+/// 返回 `None`。
+fn bracketed_phrase(lines: &[LineInfo], index: usize) -> Option<usize> {
+    if !lines[index]
+        .text_from_any()
+        .trim_start()
+        .starts_with(['(', '（'])
+    {
+        return None;
+    }
+
+    let mut depth = 0_usize;
+    for (offset, line) in lines[index..].iter().enumerate() {
+        for character in line.text_from_any().chars() {
+            match character {
+                '(' | '（' => depth += 1,
+                ')' | '）' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        if depth == 0 {
+            // 合上短语的那一行以合上它的括号收尾；它后面还有文字，说明括号不是这句短语的。
+            return line
+                .text_from_any()
+                .trim_end()
+                .ends_with([')', '）'])
+                .then_some(offset + 1);
+        }
+    }
+    None
+}
+
+/// 一段括号短语的文本，去掉标记它的括号。
+fn phrase_text(rows: &[LineInfo]) -> String {
+    rows.iter()
+        .enumerate()
+        .map(|(offset, row)| {
+            let text = row.text_from_any();
+            let mut piece = text.trim();
+            if offset == 0 {
+                piece = piece.strip_prefix(['(', '（']).unwrap_or(piece);
+            }
+            if offset + 1 == rows.len() {
+                piece = piece.strip_suffix([')', '）']).unwrap_or(piece);
+            }
+            // `text` 是本函数的临时值，所以每段都得留下自己的字符串。
+            piece.trim().to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 把回声的几行并成它所回答的那一行的背景和声。
+fn echo_background(rows: Vec<LineInfo>) -> LineInfo {
+    let mut rows = rows;
+    let mut syllables = Vec::new();
+    for row in rows.iter_mut() {
+        // 词保留回声唱出来的时间，去掉短语被写进去的那对括号。
+        continue_words(
+            &mut syllables,
+            unwrap_syllable_brackets(take_syllables(row)),
+        );
+    }
+
+    let text = phrase_text(&rows);
+    let translations = echo_translations(&rows);
+    if syllables.is_empty() {
+        let start = rows.first().and_then(|row| row.start_time());
+        let end = rows.last().and_then(|row| row.end_time());
+        return line_with_text(text, start, end, translations);
+    }
+    line_with_syllables(syllables, translations)
+}
+
+/// 返回一段短语的几行被翻译成的那个译文。
+fn echo_translations(rows: &[LineInfo]) -> HashMap<String, String> {
+    let mut pieces: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        if let Some(translations) = row.translations() {
+            for (language, text) in translations {
+                pieces
+                    .entry(language.clone())
+                    .or_default()
+                    .push(unwrap_brackets(text));
+            }
+        }
+    }
+
+    pieces
+        .into_iter()
+        .filter_map(|(language, pieces)| join_pieces(pieces).map(|joined| (language, joined)))
+        .collect()
+}
+
+/// 去掉短语与它的翻译被写进去的那对括号。
+///
+/// 提供方把自己重复的那句短语括起来，翻译也跟着一起括——`(来吧 尽管…)` 翻译的正是
+/// `(Come on, just…)`。括号是转录标记这句短语的方式，不是它说的话，所以背景和声已经单独
+/// 画出来时就不再画一次。
+pub fn unwrap_brackets(text: &str) -> String {
+    let trimmed = text.trim();
+    let Some(open) = trimmed.chars().next() else {
+        return String::new();
+    };
+    let Some(close) = matching_bracket(open) else {
+        return trimmed.to_string();
+    };
+    if !trimmed.ends_with(close) {
+        return trimmed.to_string();
+    }
+    trimmed[open.len_utf8()..trimmed.len() - close.len_utf8()]
+        .trim()
+        .to_string()
+}
+
+fn matching_bracket(open: char) -> Option<char> {
+    match open {
+        '(' => Some(')'),
+        '（' => Some('）'),
+        '[' => Some(']'),
+        '【' => Some('】'),
+        _ => None,
+    }
+}
+
+/// 括号短语写在一行里的哪个位置。
+struct BracketedPhrase {
+    /// 开括号在这一行文本里的字节下标。
+    open: usize,
+    /// 闭括号之后的字节下标。
+    close: usize,
+}
+
+/// 读出一行里最后的那段括号短语，不管它写在行的什么位置。
+///
+/// 短语括在它所回答的那一行里，而一行回答的是它最后括起来的那句：网易云把短语写在行尾，
+/// 而 `I'm in love (we're in love) with a monster` 的中间正是短语回答的位置。
+/// `(instrumental)` 这样的旁白读不出东西，因为唱出来的短语是在说一件事：括号里有字母或
+/// 数字。
+fn bracketed_phrase_in_line(text: &str) -> Option<BracketedPhrase> {
+    let mut phrase = None;
+    let mut open = None;
+    let mut inner = None;
+    let mut depth = 0_usize;
+
+    for (index, character) in text.char_indices() {
+        match character {
+            '(' | '（' => {
+                if depth == 0 {
+                    open = Some(index);
+                    inner = Some(index + character.len_utf8());
+                }
+                depth += 1;
+            }
+            ')' | '）' => {
+                if depth == 0 {
+                    continue;
+                }
+                depth -= 1;
+                if depth > 0 {
+                    continue;
+                }
+                let (Some(bracket), Some(start)) = (open.take(), inner.take()) else {
+                    continue;
+                };
+                if text[start..index].trim().chars().any(char::is_alphanumeric) {
+                    phrase = Some(BracketedPhrase {
+                        open: bracket,
+                        close: index + character.len_utf8(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    phrase
+}
+
+/// 按字符下标切开音节列表，返回尾部。
+///
+/// 跨过边界的那个音节按字符数分它的时间，因此两半在时间上仍然接连；下标在末尾之后时返回
+/// 空，调用方读作「不切」。
+fn split_syllables_at(items: &mut Vec<SyllableItem>, character_index: usize) -> Vec<SyllableItem> {
+    let mut seen = 0_usize;
+    for index in 0..items.len() {
+        if seen == character_index {
+            return items.split_off(index);
+        }
+        let count = item_characters(&items[index]);
+        if seen + count > character_index {
+            let divided = divide_item(&mut items[index], character_index - seen);
+            let mut tail = items.split_off(index + 1);
+            tail.insert(0, divided);
+            return tail;
+        }
+        seen += count;
+    }
+    Vec::new()
+}
+
+/// 把一个音节项按其中的字符下标切开，返回后半。
+///
+/// 合并音节在它的子音节上递归切开，两半都还是合并音节。
+fn divide_item(item: &mut SyllableItem, character_offset: usize) -> SyllableItem {
+    match item {
+        SyllableItem::Syllable(syllable) => {
+            SyllableItem::Syllable(divide_syllable(syllable, character_offset))
+        }
+        SyllableItem::Full(full) => SyllableItem::Full(FullSyllableInfo::new(split_sub_items(
+            full,
+            character_offset,
+        ))),
+    }
+}
+
+/// 把一个合并音节按其中的字符下标切开，返回后半的子音节。
+fn split_sub_items(full: &mut FullSyllableInfo, character_offset: usize) -> Vec<SyllableInfo> {
+    let mut seen = 0_usize;
+    for index in 0..full.sub_items().len() {
+        if seen == character_offset {
+            return full.sub_items_mut().split_off(index);
+        }
+        let count = full.sub_items()[index].text.chars().count();
+        if seen + count > character_offset {
+            let divided =
+                divide_syllable(&mut full.sub_items_mut()[index], character_offset - seen);
+            let mut tail = full.sub_items_mut().split_off(index + 1);
+            tail.insert(0, divided);
+            return tail;
+        }
+        seen += count;
+    }
+    Vec::new()
+}
+
+/// 把一个普通音节按其中的字符下标切开，返回后半。
+fn divide_syllable(syllable: &mut SyllableInfo, character_offset: usize) -> SyllableInfo {
+    let characters = syllable.text.chars().count();
+    let byte_offset = syllable
+        .text
+        .char_indices()
+        .nth(character_offset)
+        .map_or(syllable.text.len(), |(index, _)| index);
+    let span = syllable.end_time.saturating_sub(syllable.start_time);
+    // 只有文本跨过边界的音节才会被切开，所以它的字符数与其中的下标都至少是 1。
+    let boundary = syllable
+        .start_time
+        .saturating_add(span.saturating_mul(character_offset as i32) / characters as i32);
+
+    let text = syllable.text.split_off(byte_offset);
+    let divided = SyllableInfo::new(text, boundary, syllable.end_time);
+    syllable.end_time = boundary;
+    divided
+}
+
+/// 把 `words` 接到先写下的那一段词后面。
+///
+/// 续上的那一行写作时中间是不带空格的，因为断句的地方就在那里，所以接缝前的最后一个词带着
+/// 那个分隔符。视图画的是词流而不是文本，留在词流之外的空格会让两段词在屏幕上粘在一起。
+fn continue_words(target: &mut Vec<SyllableItem>, mut words: Vec<SyllableItem>) {
+    if let Some(part) = target.last_mut().and_then(last_part_mut) {
+        if !part.text.ends_with(char::is_whitespace) {
+            part.text.push(' ');
+        }
+    }
+    target.append(&mut words);
+}
+
+/// 把分几行写下的文本按中间的空格接成一句。
+///
+/// 哪一段没有内容那里就什么都没说，只装着分隔符的一段也不是文本。
+fn join_pieces(pieces: impl IntoIterator<Item = String>) -> Option<String> {
+    let text = pieces
+        .into_iter()
+        .map(|piece| piece.trim().to_string())
+        .filter(|piece| !piece.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.is_empty()).then_some(text)
+}
+
+/// 按 `translations` 是否为空构造一行文本行。
+fn line_with_text(
+    text: String,
+    start_time: Option<i32>,
+    end_time: Option<i32>,
+    translations: HashMap<String, String>,
+) -> LineInfo {
+    if translations.is_empty() {
+        LineInfo::new_line(text, start_time, end_time)
+    } else {
+        LineInfo::new_full_line(text, start_time, end_time, translations, None)
+    }
+}
+
+/// 按 `translations` 是否为空构造一行音节行（时间由音节推导）。
+fn line_with_syllables(
+    syllables: Vec<SyllableItem>,
+    translations: HashMap<String, String>,
+) -> LineInfo {
+    if translations.is_empty() {
+        LineInfo::new_syllable(syllables)
+    } else {
+        LineInfo::new_full_syllable(syllables, translations, None)
+    }
+}
+
+/// 取走一行的音节，行里留下空列表。
+fn take_syllables(line: &mut LineInfo) -> Vec<SyllableItem> {
+    line.syllables_mut().map(std::mem::take).unwrap_or_default()
+}
+
+/// 把音节放回一行。
+fn set_syllables(line: &mut LineInfo, items: Vec<SyllableItem>) {
+    if let Some(syllables) = line.syllables_mut() {
+        *syllables = items;
+    }
+}
+
+/// 返回这一行是否带逐词时间。
+fn is_word_timed(line: &LineInfo) -> bool {
+    line.syllables()
+        .is_some_and(|items| items.iter().any(has_text))
+}
+
+/// 返回这一行提到的最晚时刻：行时间与音节时间的较晚者（不含子行）。
+fn latest_time_ms(line: &LineInfo) -> i32 {
+    let start = line.start_time().unwrap_or_default();
+    let from_syllables = line
+        .syllables()
+        .unwrap_or_default()
+        .iter()
+        .map(SyllableItem::end_time)
+        .max()
+        .unwrap_or(start);
+    line.end_time()
+        .unwrap_or(start)
+        .max(from_syllables)
+        .max(start)
+}
+
+/// 返回一个音节项是否写了内容。
+fn has_text(item: &SyllableItem) -> bool {
+    item.parts().iter().any(|part| !part.text.trim().is_empty())
+}
+
+/// 返回一个音节项写下的字符数。
+fn item_characters(item: &SyllableItem) -> usize {
+    item.parts()
+        .iter()
+        .map(|part| part.text.chars().count())
+        .sum()
+}
+
+/// 返回一个音节项第一个普通音节的可变引用（合并音节取它的第一个子音节）。
+fn first_part_mut(item: &mut SyllableItem) -> Option<&mut SyllableInfo> {
+    item.parts_mut().first_mut()
+}
+
+/// 返回一个音节项最后一个普通音节的可变引用（合并音节取它的最后一个子音节）。
+fn last_part_mut(item: &mut SyllableItem) -> Option<&mut SyllableInfo> {
+    item.parts_mut().last_mut()
+}
+
+/// 去掉音节列表开头那个词前面的空白。
+fn trim_start_of_first_word(items: &mut [SyllableItem]) {
+    if let Some(part) = items.first_mut().and_then(first_part_mut) {
+        let blank = part.text.len() - part.text.trim_start().len();
+        part.text.drain(..blank);
+    }
+}
+
+/// 去掉音节列表末尾那个词后面的空白。
+fn trim_end_of_last_word(items: &mut [SyllableItem]) {
+    if let Some(part) = items.last_mut().and_then(last_part_mut) {
+        let end = part.text.trim_end().len();
+        part.text.truncate(end);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 一个音节。
+    fn syllable(start_time: i32, end_time: i32, text: &str) -> SyllableItem {
+        SyllableInfo::new(text.to_string(), start_time, end_time).into()
+    }
+
+    /// 一行歌词：没有音节时是文本行，有音节时是音节行（音节必须正好拼出 `text`）。
+    fn line(
+        start_time: i32,
+        end_time: Option<i32>,
+        text: &str,
+        syllables: Vec<SyllableItem>,
+    ) -> LineInfo {
+        if syllables.is_empty() {
+            return LineInfo::new_line(text.to_string(), Some(start_time), end_time);
+        }
+        let spelled = LineInfo::text_from_syllables(&syllables);
+        assert_eq!(spelled, text, "测试写的音节要正好拼出这一行的文字");
+        LineInfo::new_syllable_with_time(syllables, Some(start_time), end_time)
+    }
+
+    /// 一行的背景和声文本。
+    fn background_text(line: &LineInfo) -> Option<String> {
+        line.sub_line().map(LineInfo::text_from_any)
+    }
+
+    /// 一行的词，合并音节展开成子音节。
+    fn texts(line: &LineInfo) -> Vec<String> {
+        line.syllables()
+            .unwrap_or_default()
+            .iter()
+            .map(SyllableItem::text)
+            .collect()
+    }
+
+    #[test]
+    fn a_bracketed_tail_becomes_a_background_vocal() {
+        // 网易云写《Umbrella》伴唱的形状：写在它所回答的那一行里的括号尾巴，括号本身是
+        // 两个零长度的音节。
+        let mut lines = vec![line(
+            0,
+            Some(4_650),
+            "Ahuh Ahuh （Yea Rihanna）",
+            vec![
+                syllable(0, 180, "Ahuh "),
+                syllable(180, 270, "Ahuh "),
+                syllable(270, 270, "（"),
+                syllable(270, 3_990, "Yea "),
+                syllable(3_990, 4_650, "Rihanna"),
+                syllable(4_650, 4_650, "）"),
+            ],
+        )];
+
+        split_background_vocals(&mut lines);
+
+        assert_eq!(lines[0].text_from_any(), "Ahuh Ahuh");
+        assert_eq!(background_text(&lines[0]).as_deref(), Some("Yea Rihanna"));
+        assert_eq!(
+            texts(&lines[0]),
+            vec!["Ahuh ", "Ahuh"],
+            "行尾不再留着短语前那个分隔符"
+        );
+        let background = lines[0].sub_line().expect("尾巴被切了出来");
+        assert_eq!(
+            (background.start_time(), background.end_time()),
+            (Some(270), Some(4_650)),
+            "尾巴唱在它自己的词所在的位置上"
+        );
+    }
+
+    #[test]
+    fn a_bracketed_tail_inside_a_syllable_is_divided_by_its_characters() {
+        let mut lines = vec![line(
+            1_000,
+            Some(3_000),
+            "Hold on (ohyeah)",
+            vec![
+                syllable(1_000, 1_500, "Hold "),
+                syllable(1_500, 2_500, "on (ohyeah)"),
+            ],
+        )];
+
+        split_background_vocals(&mut lines);
+
+        assert_eq!(lines[0].text_from_any(), "Hold on");
+        assert_eq!(background_text(&lines[0]).as_deref(), Some("ohyeah"));
+        assert_eq!(texts(&lines[0]), vec!["Hold ", "on"]);
+        assert_eq!(
+            lines[0]
+                .sub_line()
+                .map(|background| (background.start_time(), background.end_time())),
+            Some((Some(1_772), Some(2_500))),
+            "尾巴留下的那一半从它留下的字符开始"
+        );
+        // 被切开的两半在时间上仍然接连。
+        assert_eq!(
+            lines[0].syllables().unwrap()[1].end_time(),
+            1_500 + 1_000 * 3 / 11
+        );
+    }
+
+    /// 给一行写上中文译文（没有 Full 变体时升级为 Full 变体）。
+    fn with_chinese(line: LineInfo, text: &str) -> LineInfo {
+        line.to_full_line(HashMap::from([("zh".to_string(), text.to_string())]), None)
+    }
+
+    #[test]
+    fn a_bracketed_phrase_inside_the_line_becomes_a_background_vocal() {
+        // 《I'm In Love With a Monster》把两人合唱的词写在它所回答的那一行中间，这一行
+        // 在短语之后还接着唱下去。
+        let mut lines = vec![line(
+            1_849,
+            Some(5_627),
+            "I'm in love (we're in love) with a monster",
+            vec![
+                syllable(1_849, 2_029, "I'm "),
+                syllable(2_029, 2_219, "in "),
+                syllable(2_219, 2_928, "love "),
+                syllable(2_928, 3_308, "("),
+                syllable(3_308, 3_488, "we're "),
+                syllable(3_488, 3_918, "in "),
+                syllable(3_918, 4_437, "love) "),
+                syllable(4_437, 4_607, "with "),
+                syllable(4_607, 4_787, "a "),
+                syllable(4_787, 5_627, "monster"),
+            ],
+        )];
+
+        split_background_vocals(&mut lines);
+
+        assert_eq!(lines[0].text_from_any(), "I'm in love with a monster");
+        assert_eq!(
+            texts(&lines[0]),
+            vec!["I'm ", "in ", "love ", "with ", "a ", "monster"],
+            "这一行画出来的词是短语两边的词"
+        );
+        let background = lines[0].sub_line().expect("短语被切了出来");
+        assert_eq!(background.text_from_any(), "we're in love");
+        assert_eq!(
+            texts(background),
+            vec!["we're ", "in ", "love"],
+            "括号不是唱出来的，所以不是短语的词"
+        );
+        assert_eq!(
+            (background.start_time(), background.end_time()),
+            (Some(3_308), Some(4_350)),
+            "短语唱在它自己的词所在的位置上，在这一行里面"
+        );
+    }
+
+    #[test]
+    fn a_bracketed_phrase_the_line_opens_with_becomes_a_background_vocal() {
+        let mut lines = vec![line(
+            0,
+            Some(2_000),
+            "(Oh) I love it",
+            vec![
+                syllable(0, 300, "(Oh) "),
+                syllable(300, 700, "I "),
+                syllable(700, 1_200, "love "),
+                syllable(1_200, 2_000, "it"),
+            ],
+        )];
+
+        split_background_vocals(&mut lines);
+
+        assert_eq!(lines[0].text_from_any(), "I love it");
+        assert_eq!(texts(&lines[0]), vec!["I ", "love ", "it"]);
+        assert_eq!(background_text(&lines[0]).as_deref(), Some("Oh"));
+    }
+
+    #[test]
+    fn a_bracketed_tail_without_words_is_left_alone() {
+        let mut lines = vec![line(
+            1_000,
+            Some(3_000),
+            "Wait (...)",
+            vec![
+                syllable(1_000, 2_000, "Wait "),
+                syllable(2_000, 3_000, "(...)"),
+            ],
+        )];
+
+        split_background_vocals(&mut lines);
+
+        assert_eq!(lines[0].text_from_any(), "Wait (...)");
+        assert!(lines[0].sub_line().is_none());
+    }
+
+    #[test]
+    fn a_line_timed_source_keeps_its_brackets() {
+        // 只有行级时间的 LRC 行没有可以用来切开尾巴的逐词时间。
+        let mut lines = vec![line(0, None, "Know the way (My way)", Vec::new())];
+
+        split_background_vocals(&mut lines);
+
+        assert_eq!(lines[0].text_from_any(), "Know the way (My way)");
+        assert!(lines[0].sub_line().is_none());
+    }
+
+    #[test]
+    fn a_wholly_bracketed_line_joins_the_line_it_echoes() {
+        // QQ 音乐写《hate that i made you love me》的形状：独占一行的括号句，定在它所回答
+        // 的那一行唱完的时刻。
+        let mut lines = vec![
+            line(
+                1_000,
+                Some(3_000),
+                "Know the way",
+                vec![
+                    syllable(1_000, 2_000, "Know "),
+                    syllable(2_000, 3_000, "the way"),
+                ],
+            ),
+            line(
+                3_000,
+                Some(4_000),
+                "(My way)",
+                vec![
+                    syllable(3_000, 3_100, "("),
+                    syllable(3_100, 4_000, "My way)"),
+                ],
+            ),
+        ];
+
+        fold_bracketed_echoes(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text_from_any(), "Know the way");
+        assert_eq!(background_text(&lines[0]).as_deref(), Some("My way"));
+    }
+
+    #[test]
+    fn a_folded_echo_keeps_its_own_translation() {
+        // 回声译在它被唱出来的地方，所以它的译文跟着它走，而不是跟着它不再是的那个行丢掉。
+        let mut lines = vec![
+            with_chinese(
+                line(
+                    1_000,
+                    Some(3_000),
+                    "Know the way",
+                    vec![syllable(1_000, 3_000, "Know the way")],
+                ),
+                "要知道方法",
+            ),
+            with_chinese(
+                line(
+                    3_000,
+                    Some(4_000),
+                    "(My way)",
+                    vec![syllable(3_000, 4_000, "(My way)")],
+                ),
+                "（从我身边离开的方法）",
+            ),
+        ];
+
+        fold_bracketed_echoes(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].chinese_translation(), Some("要知道方法"));
+        let background = lines[0].sub_line().expect("回声被并了进来");
+        assert_eq!(background.text_from_any(), "My way");
+        assert_eq!(
+            (background.start_time(), background.end_time()),
+            (Some(3_000), Some(4_000)),
+            "回声唱在它自己的词所在的位置上，不是它前面那一行唱完的地方"
+        );
+        assert_eq!(
+            texts(background),
+            vec!["My way"],
+            "括号不是唱出来的，所以不是回声的词"
+        );
+        assert_eq!(
+            background.chinese_translation(),
+            Some("从我身边离开的方法"),
+            "短语被写进去的那对括号不在它的译文里重复"
+        );
+    }
+
+    #[test]
+    fn a_bracketed_echo_answers_the_rest_its_line_leaves() {
+        // 《Saddle Up》的伴唱：`Are you man enough to hold it down` 唱完之后留出停顿，
+        // 它的回声一秒半之后才起。
+        let mut lines = vec![
+            line(
+                1_000,
+                Some(3_172),
+                "Are you man enough to hold it down",
+                vec![syllable(1_000, 3_172, "Are you man enough to hold it down")],
+            ),
+            line(
+                4_639,
+                Some(6_751),
+                "(I wanna see you hold it down for me)",
+                vec![syllable(
+                    4_639,
+                    6_751,
+                    "(I wanna see you hold it down for me)",
+                )],
+            ),
+        ];
+
+        fold_bracketed_echoes(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].text_from_any(),
+            "Are you man enough to hold it down"
+        );
+        assert_eq!(
+            background_text(&lines[0]).as_deref(),
+            Some("I wanna see you hold it down for me")
+        );
+    }
+
+    #[test]
+    fn a_bracketed_phrase_written_across_rows_joins_the_line_it_answers() {
+        // 《Saddle Up》把副歌重复在尾声下面的写法：短语在它开始的那一行打开，在中间几行
+        // 接着写，在它结束的那一行合上，而它后面那一行又自成一行。
+        let mut lines = vec![
+            line(
+                1_000,
+                Some(2_586),
+                "come and drive me crazy",
+                vec![syllable(1_000, 2_586, "come and drive me crazy")],
+            ),
+            with_chinese(
+                line(
+                    2_586,
+                    Some(3_000),
+                    "(If you walk it",
+                    vec![
+                        syllable(2_586, 2_700, "(If "),
+                        syllable(2_700, 2_800, "you "),
+                        syllable(2_800, 2_900, "walk "),
+                        syllable(2_900, 3_000, "it"),
+                    ],
+                ),
+                "如果你言行一致",
+            ),
+            with_chinese(
+                line(
+                    3_000,
+                    Some(3_300),
+                    "Baby, stand up",
+                    vec![
+                        syllable(3_000, 3_100, "Baby, "),
+                        syllable(3_100, 3_200, "stand "),
+                        syllable(3_200, 3_300, "up"),
+                    ],
+                ),
+                "宝贝 请挺身而出",
+            ),
+            line(
+                3_300,
+                Some(3_391),
+                "Baby, we go up)",
+                vec![
+                    syllable(3_300, 3_330, "Baby, "),
+                    syllable(3_330, 3_360, "we "),
+                    syllable(3_360, 3_390, "go "),
+                    syllable(3_390, 3_391, "up)"),
+                ],
+            ),
+            line(
+                4_000,
+                Some(5_000),
+                "Put your money",
+                vec![syllable(4_000, 5_000, "Put your money")],
+            ),
+        ];
+
+        fold_bracketed_echoes(&mut lines);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1].text_from_any(), "Put your money");
+        assert_eq!(lines[0].text_from_any(), "come and drive me crazy");
+        let background = lines[0].sub_line().expect("这段短语被并了进来");
+        assert_eq!(
+            background.text_from_any(),
+            "If you walk it Baby, stand up Baby, we go up"
+        );
+        assert_eq!(
+            LineInfo::text_from_syllables(background.syllables().unwrap()),
+            background.text_from_any(),
+            "词拼起来正是这段短语写下的样子"
+        );
+        assert_eq!(
+            (background.start_time(), background.end_time()),
+            (Some(2_586), Some(3_391)),
+            "短语从它第一行开始的地方唱到它最后一行结束的地方"
+        );
+        assert_eq!(
+            background.chinese_translation(),
+            Some("如果你言行一致 宝贝 请挺身而出"),
+            "分几行写的短语每一行都有译文"
+        );
+    }
+
+    #[test]
+    fn an_unmatched_bracket_does_not_reach_across_the_song() {
+        // 一行开着的括号跟着它后面的几行并不是它们所属的短语：它们离本该回答的那一行太远。
+        let mut lines = vec![
+            line(
+                1_000,
+                Some(2_000),
+                "Know the way",
+                vec![syllable(1_000, 2_000, "Know the way")],
+            ),
+            line(
+                2_000,
+                Some(3_000),
+                "(hold on",
+                vec![syllable(2_000, 3_000, "(hold on")],
+            ),
+            line(
+                20_000,
+                Some(21_000),
+                "sing it",
+                vec![syllable(20_000, 21_000, "sing it")],
+            ),
+            line(
+                21_000,
+                Some(22_000),
+                "again)",
+                vec![syllable(21_000, 22_000, "again)")],
+            ),
+        ];
+
+        fold_bracketed_echoes(&mut lines);
+
+        assert_eq!(lines.len(), 4);
+        assert!(lines[0].sub_line().is_none());
+    }
+
+    #[test]
+    fn an_unbracketed_translation_keeps_its_text() {
+        assert_eq!(unwrap_brackets("来吧 尽管…"), "来吧 尽管…");
+        assert_eq!(unwrap_brackets("  (来吧 尽管…)  "), "来吧 尽管…");
+        assert_eq!(unwrap_brackets("【来吧 尽管…】"), "来吧 尽管…");
+        assert_eq!(
+            unwrap_brackets("(来吧"),
+            "(来吧",
+            "落单的括号是文本的一部分"
+        );
+        assert_eq!(unwrap_brackets("("), "(");
+    }
+
+    #[test]
+    fn a_bracketed_line_far_from_the_previous_one_stays_its_own_line() {
+        // 歌里别处的括号句什么都不回答；只有跟前面那一行时间对得上的行是它的回声。
+        let mut lines = vec![
+            line(
+                1_000,
+                Some(2_000),
+                "Know the way",
+                vec![syllable(1_000, 2_000, "Know the way")],
+            ),
+            line(
+                9_000,
+                Some(10_000),
+                "(Instrumental)",
+                vec![syllable(9_000, 10_000, "(Instrumental)")],
+            ),
+        ];
+
+        fold_bracketed_echoes(&mut lines);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1].text_from_any(), "(Instrumental)");
+        assert!(lines[0].sub_line().is_none());
+    }
+
+    #[test]
+    fn a_bracketed_opening_line_stays_one_ordinary_line() {
+        // 它前面什么都没有，没有它可以归属的那一行。
+        let mut lines = vec![line(
+            0,
+            Some(1_000),
+            "（Ella ella）",
+            vec![syllable(0, 1_000, "（Ella ella）")],
+        )];
+
+        fold_bracketed_echoes(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text_from_any(), "（Ella ella）");
+        assert!(lines[0].sub_line().is_none());
+    }
+}

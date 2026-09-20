@@ -149,6 +149,17 @@ impl SyllableItem {
         }
     }
 
+    /// 返回普通音节序列的可变引用：普通音节返回自身，合并音节返回全部子音节。
+    ///
+    /// 改到的是同一个序列 [`SyllableItem::parts`] 读到的，因此改它不会与聚合文本、
+    /// 聚合时间脱节（它们由子项即时推导）。
+    pub fn parts_mut(&mut self) -> &mut [SyllableInfo] {
+        match self {
+            Self::Syllable(syllable) => std::slice::from_mut(syllable),
+            Self::Full(full) => full.sub_items_mut(),
+        }
+    }
+
     /// 返回普通音节的只读引用，合并音节返回 `None`。
     pub fn as_syllable(&self) -> Option<&SyllableInfo> {
         match self {
