@@ -213,6 +213,16 @@ impl LineInfo {
         }
     }
 
+    /// 返回子行的可变引用（如背景和声）。
+    pub fn sub_line_mut(&mut self) -> Option<&mut LineInfo> {
+        match self {
+            Self::Line { sub_line, .. }
+            | Self::Syllable { sub_line, .. }
+            | Self::FullLine { sub_line, .. }
+            | Self::FullSyllable { sub_line, .. } => sub_line.as_deref_mut(),
+        }
+    }
+
     /// 设置子行。
     pub fn set_sub_line(&mut self, new_sub_line: Option<Box<LineInfo>>) {
         match self {
@@ -302,51 +312,18 @@ impl LineInfo {
     ///
     /// 子行文本以括号附加，若子行开始时间早于主行则前置显示。
     pub fn full_text(&self) -> String {
-        match self {
-            Self::Line { text, sub_line, .. } | Self::FullLine { text, sub_line, .. } => {
-                if let Some(sub) = sub_line {
-                    let sub_text = crate::helpers::string_helper::remove_front_back_brackets(
-                        &sub.text_from_any(),
-                    );
-                    match (sub.start_time(), self.start_time()) {
-                        (Some(sub_t), Some(main_t)) if sub_t < main_t => {
-                            format!("({}) {}", sub_text, text.trim())
-                        }
-                        _ => {
-                            format!("{} ({})", text.trim(), sub_text)
-                        }
-                    }
-                } else {
-                    text.clone()
-                }
+        let text = self.text_from_any();
+        let Some(sub) = self.sub_line() else {
+            return text;
+        };
+
+        let sub_text =
+            crate::helpers::string_helper::remove_front_back_brackets(&sub.text_from_any());
+        match (sub.start_time(), self.start_time()) {
+            (Some(sub_start), Some(start)) if sub_start < start => {
+                format!("({}) {}", sub_text, text.trim())
             }
-            Self::Syllable {
-                syllables,
-                sub_line,
-                ..
-            }
-            | Self::FullSyllable {
-                syllables,
-                sub_line,
-                ..
-            } => {
-                let text = Self::text_from_syllables(syllables);
-                if let Some(sub) = sub_line {
-                    let sub_text = crate::helpers::string_helper::remove_front_back_brackets(
-                        &sub.text_from_any(),
-                    );
-                    match (sub.start_time(), self.start_time()) {
-                        (Some(sub_t), Some(main_t)) if sub_t < main_t => {
-                            format!("({}) {}", sub_text, text.trim())
-                        }
-                        _ => {
-                            format!("{} ({})", text.trim(), sub_text)
-                        }
-                    }
-                } else {
-                    text
-                }
-            }
+            _ => format!("{} ({})", text.trim(), sub_text),
         }
     }
 

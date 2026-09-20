@@ -22,74 +22,14 @@ use super::utf16::is_upper_unit;
 pub fn clean(str: &str, strong: bool) -> String {
     if strong {
         // 上游顺序：先还原已屏蔽形式，再整词屏蔽，最后处理三处边界词。
-        let str = fix_explicit(str)
-            .replace("bitches", "*****")
-            .replace("Bitches", "*****")
-            .replace("bitch", "*****")
-            .replace("Bitch", "*****")
-            .replace("damn", "****")
-            .replace("Damn", "****")
-            .replace("dammit", "******")
-            .replace("Dammit", "******")
-            .replace("dick", "****")
-            .replace("Dick", "****")
-            .replace("dope", "****")
-            .replace("Dope", "****")
-            .replace("fuck", "****")
-            .replace("Fuck", "****")
-            .replace("nigga", "*****")
-            .replace("Nigga", "*****")
-            .replace("nigras", "******")
-            .replace("Nigras", "******")
-            .replace("pussy", "*****")
-            .replace("Pussy", "*****")
-            .replace("sex", "***")
-            .replace("Sex", "***")
-            .replace("shit", "****")
-            .replace("Shit", "****")
-            .replace("weed", "****")
-            .replace("Weed", "****")
-            .replace("whore", "*****")
-            .replace("Whore", "*****")
-            .replace("cocaine", "*******")
-            .replace("Cocaine", "*******")
-            .replace("drug", "****")
-            .replace("Drug", "****");
-
+        let str = apply_replacements(&fix_explicit(str), STRONG_MASKS);
         apply_boundary_masks(
             &str,
             [(*b"ass", *b"***"), (*b"Ass", *b"***"), (*b"hoe", *b"***")],
         )
     } else {
         // 上游顺序：先做一批固定替换，再处理三处边界词。
-        let str = str
-            .replace("bitch", "b***h")
-            .replace("Bitch", "B***h")
-            .replace("damn", "d**n")
-            .replace("Damn", "D**n")
-            .replace("dammit", "D**mit")
-            .replace("Dammit", "D**mit")
-            .replace("dick", "d**k")
-            .replace("Dick", "D**k")
-            .replace("dope", "d**e")
-            .replace("Dope", "D**e")
-            .replace("fuck", "f**k")
-            .replace("Fuck", "F**k")
-            .replace("nigga", "n***a")
-            .replace("Nigga", "N***a")
-            .replace("nigras", "n***as")
-            .replace("Nigras", "N***as")
-            .replace("pussy", "p***y")
-            .replace("Pussy", "P***y")
-            .replace("sex", "s*x")
-            .replace("Sex", "S*x")
-            .replace("shit", "s**t")
-            .replace("Shit", "S**t")
-            .replace("weed", "w**d")
-            .replace("Weed", "W**d")
-            .replace("whore", "w***e")
-            .replace("Whore", "W***e");
-
+        let str = apply_replacements(str, PARTIAL_MASKS);
         apply_boundary_masks(
             &str,
             [(*b"ass", *b"a*s"), (*b"Ass", *b"A*s"), (*b"hoe", *b"h*e")],
@@ -97,9 +37,88 @@ pub fn clean(str: &str, strong: bool) -> String {
     }
 }
 
+/// 按表顺序逐项替换，对应上游 `Clean` 中链式的 `string.Replace`。
+///
+/// 替换必须保持顺序：后一项作用在前一项的结果上，与上游一致。
+fn apply_replacements(str: &str, masks: &[(&str, &str)]) -> String {
+    masks.iter().fold(str.to_string(), |text, (word, mask)| {
+        text.replace(word, mask)
+    })
+}
+
+/// `strong = true` 时的整词屏蔽表，对应上游 `Clean` 中的替换链。
+///
+/// 两种首字母大小写共用同一串星号，仍分开列出以保持与上游逐项一致的替换顺序。
+const STRONG_MASKS: &[(&str, &str)] = &[
+    ("bitches", "*****"),
+    ("Bitches", "*****"),
+    ("bitch", "*****"),
+    ("Bitch", "*****"),
+    ("damn", "****"),
+    ("Damn", "****"),
+    ("dammit", "******"),
+    ("Dammit", "******"),
+    ("dick", "****"),
+    ("Dick", "****"),
+    ("dope", "****"),
+    ("Dope", "****"),
+    ("fuck", "****"),
+    ("Fuck", "****"),
+    ("nigga", "*****"),
+    ("Nigga", "*****"),
+    ("nigras", "******"),
+    ("Nigras", "******"),
+    ("pussy", "*****"),
+    ("Pussy", "*****"),
+    ("sex", "***"),
+    ("Sex", "***"),
+    ("shit", "****"),
+    ("Shit", "****"),
+    ("weed", "****"),
+    ("Weed", "****"),
+    ("whore", "*****"),
+    ("Whore", "*****"),
+    ("cocaine", "*******"),
+    ("Cocaine", "*******"),
+    ("drug", "****"),
+    ("Drug", "****"),
+];
+
+/// `strong = false` 时的词内屏蔽表，对应上游 `Clean` 中的替换链。
+///
+/// 上游的 `"dammit" -> "D**mit"` 首字母是大写，这里原样保留。
+const PARTIAL_MASKS: &[(&str, &str)] = &[
+    ("bitch", "b***h"),
+    ("Bitch", "B***h"),
+    ("damn", "d**n"),
+    ("Damn", "D**n"),
+    ("dammit", "D**mit"),
+    ("Dammit", "D**mit"),
+    ("dick", "d**k"),
+    ("Dick", "D**k"),
+    ("dope", "d**e"),
+    ("Dope", "D**e"),
+    ("fuck", "f**k"),
+    ("Fuck", "F**k"),
+    ("nigga", "n***a"),
+    ("Nigga", "N***a"),
+    ("nigras", "n***as"),
+    ("Nigras", "N***as"),
+    ("pussy", "p***y"),
+    ("Pussy", "P***y"),
+    ("sex", "s*x"),
+    ("Sex", "S*x"),
+    ("shit", "s**t"),
+    ("Shit", "S**t"),
+    ("weed", "w**d"),
+    ("Weed", "W**d"),
+    ("whore", "w***e"),
+    ("Whore", "W***e"),
+];
+
 /// 修复字符串，把已屏蔽的星号形式还原为原词（对应上游 `FixExplicit`）。
 ///
-/// 逐个应用 [`REPLACEMENTS`] 中的正则（忽略大小写）；若匹配到的首字符为大写，
+/// 逐个应用 `REPLACEMENTS` 中的正则（忽略大小写）；若匹配到的首字符为大写，
 /// 则替换词的首字母也大写（对应上游 `MatchEvaluator`）。
 ///
 /// 与上游唯一的差异在“忽略大小写”的实现上：上游 `RegexOptions.IgnoreCase` 按

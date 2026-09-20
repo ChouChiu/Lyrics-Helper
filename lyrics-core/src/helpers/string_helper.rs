@@ -17,18 +17,12 @@ pub fn is_number(s: &str) -> bool {
 /// 移除字符串首尾的半角括号 `()` 或全角括号 `（）`。
 pub fn remove_front_back_brackets(s: &str) -> String {
     let s = s.trim();
-    if s.starts_with('(') && s.ends_with(')') {
-        s[1..s.len() - 1].to_string()
-    } else if s.starts_with('（') && s.ends_with('）') {
-        let chars: Vec<char> = s.chars().collect();
-        if chars.len() >= 2 {
-            chars[1..chars.len() - 1].iter().collect()
-        } else {
-            s.to_string()
+    for (open, close) in [('(', ')'), ('（', '）')] {
+        if let Some(inner) = s.strip_prefix(open).and_then(|s| s.strip_suffix(close)) {
+            return inner.to_string();
         }
-    } else {
-        s.to_string()
     }
+    s.to_string()
 }
 
 /// 计算两段文本的相似度（百分比），基于最长公共子序列（LCS）算法。
@@ -79,8 +73,8 @@ pub fn lcs_length(x: &str, y: &str) -> usize {
                 curr[j] = prev[j].max(curr[j - 1]);
             }
         }
+        // `curr` 的 1..=n 会在下一轮被全部覆盖，`curr[0]` 恒为 0，无需清零。
         std::mem::swap(&mut prev, &mut curr);
-        curr.fill(0);
     }
     prev[n]
 }

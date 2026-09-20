@@ -12,11 +12,9 @@ pub fn downgrade_to_line_synced(lines: &mut [LineInfo]) {
 /// 已是行级同步的歌词仅递归更新子行；音节为空的异常情况保持原样。
 pub fn downgrade_line(line: &mut LineInfo) {
     // 先递归处理子行
-    let mut sub_line = line.take_sub_line();
-    if let Some(sub) = sub_line.as_mut() {
+    if let Some(sub) = line.sub_line_mut() {
         downgrade_line(sub);
     }
-    line.set_sub_line(sub_line);
 
     if !line.is_syllable() {
         return;

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use super::lyrics_types::{LyricsTypes, SyncTypes};
 use super::line_info::LineInfo;
+use super::lyrics_types::{LyricsTypes, SyncTypes};
 use super::track_metadata::TrackMetadata;
 
 /// 歌词数据的顶层容器，包含解析后的完整歌词信息。

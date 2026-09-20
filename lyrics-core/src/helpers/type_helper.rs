@@ -200,7 +200,7 @@ fn has_non_empty_string(value: &Value, name: &str) -> bool {
 
 /// 判断 JSON 根对象的歌词原始类型。
 fn get_json_type(input: &str) -> LyricsRawTypes {
-    if input.trim().is_empty() || !input.trim_start().starts_with('{') {
+    if !input.trim_start().starts_with('{') {
         return LyricsRawTypes::Unknown;
     }
 
@@ -309,7 +309,7 @@ struct XmlScan {
 /// - 未声明的前缀不会导致解析失败（只能使命名空间解析为 `Unknown`）；
 /// - 不处理 DTD 实体展开。正常 QRC Full 与 TTML 文档行为与上游一致。
 fn get_xml_type(input: &str) -> LyricsRawTypes {
-    if input.trim().is_empty() || !input.trim_start().starts_with('<') {
+    if !input.trim_start().starts_with('<') {
         return LyricsRawTypes::Unknown;
     }
 
@@ -431,53 +431,54 @@ impl LyricsRawTypes {
 /// `LYRICIFY SYLLABLE(S)`、`MUSIXMATCH (JSON)`/`MUSIXMATCH JSON`/`MUSIXMATCHJSON`、
 /// `SPOTIFY (JSON)`/`SPOTIFY JSON`/`SPOTIFYJSON`）。
 pub fn try_parse_raw_type(name: &str) -> Option<LyricsRawTypes> {
-    if name.trim().is_empty() {
+    let value = name.trim();
+    if value.is_empty() {
         return None;
     }
 
-    let value = name.trim();
+    let upper = value.to_uppercase();
+
     // 上游使用 `char.IsDigit`（Unicode Nd），此处以 `char::is_numeric` 近似。
     if !value.chars().next().is_some_and(char::is_numeric) {
-        let parsed = match value.to_uppercase().as_str() {
-            "LYRICIFYSYLLABLE" => LyricsRawTypes::LyricifySyllable,
-            "LYRICIFYLINES" => LyricsRawTypes::LyricifyLines,
-            "LRC" => LyricsRawTypes::Lrc,
-            "QRC" => LyricsRawTypes::Qrc,
-            "QRCFULL" => LyricsRawTypes::QrcFull,
-            "KRC" => LyricsRawTypes::Krc,
-            "YRC" => LyricsRawTypes::Yrc,
-            "YRCFULL" => LyricsRawTypes::YrcFull,
-            "TTML" => LyricsRawTypes::Ttml,
-            "APPLEJSON" => LyricsRawTypes::AppleJson,
-            "SPOTIFY" => LyricsRawTypes::Spotify,
-            "MUSIXMATCH" => LyricsRawTypes::Musixmatch,
-            _ => LyricsRawTypes::Unknown,
+        let variant = match upper.as_str() {
+            "LYRICIFYSYLLABLE" => Some(LyricsRawTypes::LyricifySyllable),
+            "LYRICIFYLINES" => Some(LyricsRawTypes::LyricifyLines),
+            "LRC" => Some(LyricsRawTypes::Lrc),
+            "QRC" => Some(LyricsRawTypes::Qrc),
+            "QRCFULL" => Some(LyricsRawTypes::QrcFull),
+            "KRC" => Some(LyricsRawTypes::Krc),
+            "YRC" => Some(LyricsRawTypes::Yrc),
+            "YRCFULL" => Some(LyricsRawTypes::YrcFull),
+            "TTML" => Some(LyricsRawTypes::Ttml),
+            "APPLEJSON" => Some(LyricsRawTypes::AppleJson),
+            "SPOTIFY" => Some(LyricsRawTypes::Spotify),
+            "MUSIXMATCH" => Some(LyricsRawTypes::Musixmatch),
+            _ => None,
         };
-        if parsed != LyricsRawTypes::Unknown {
-            return Some(parsed);
+        if variant.is_some() {
+            return variant;
         }
     }
 
-    let parsed = match value.to_uppercase().as_str() {
-        "QRC (FULL)" | "QRC (XML)" => LyricsRawTypes::QrcFull,
-        "YRC (FULL)" | "YRC (JSON)" => LyricsRawTypes::YrcFull,
-        "APPLE MUSIC (JSON)" | "APPLE MUSIC JSON" | "APPLE MUSIC" => LyricsRawTypes::AppleJson,
-        "LYRICIFY LINE" | "LYRICIFY LINES" => LyricsRawTypes::LyricifyLines,
-        "LYRICIFY SYLLABLE" | "LYRICIFY SYLLABLES" => LyricsRawTypes::LyricifySyllable,
-        "MUSIXMATCH (JSON)" | "MUSIXMATCH JSON" | "MUSIXMATCHJSON" => LyricsRawTypes::Musixmatch,
-        "SPOTIFY (JSON)" | "SPOTIFY JSON" | "SPOTIFYJSON" => LyricsRawTypes::Spotify,
-        _ => LyricsRawTypes::Unknown,
-    };
-    (parsed != LyricsRawTypes::Unknown).then_some(parsed)
+    match upper.as_str() {
+        "QRC (FULL)" | "QRC (XML)" => Some(LyricsRawTypes::QrcFull),
+        "YRC (FULL)" | "YRC (JSON)" => Some(LyricsRawTypes::YrcFull),
+        "APPLE MUSIC (JSON)" | "APPLE MUSIC JSON" | "APPLE MUSIC" => {
+            Some(LyricsRawTypes::AppleJson)
+        }
+        "LYRICIFY LINE" | "LYRICIFY LINES" => Some(LyricsRawTypes::LyricifyLines),
+        "LYRICIFY SYLLABLE" | "LYRICIFY SYLLABLES" => Some(LyricsRawTypes::LyricifySyllable),
+        "MUSIXMATCH (JSON)" | "MUSIXMATCH JSON" | "MUSIXMATCHJSON" => {
+            Some(LyricsRawTypes::Musixmatch)
+        }
+        "SPOTIFY (JSON)" | "SPOTIFY JSON" | "SPOTIFYJSON" => Some(LyricsRawTypes::Spotify),
+        _ => None,
+    }
 }
 
 /// 取原始类型名称的显示名称（对应上游 `GetRawTypeDisplayName`）：
 /// 解析成功时返回规范显示名，否则返回去除首尾空白的原名。
 pub fn get_raw_type_display_name(name: &str) -> String {
-    if name.trim().is_empty() {
-        return String::new();
-    }
-
     match try_parse_raw_type(name) {
         Some(raw_type) => raw_type.display_name().to_string(),
         None => name.trim().to_string(),

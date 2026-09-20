@@ -90,5 +90,3 @@ pub enum LyricsAlignment {
     /// 右对齐
     Right,
 }
-
-

@@ -1,5 +1,3 @@
-use std::cell::{Cell, RefCell};
-
 use serde::{Deserialize, Serialize};
 
 /// 单个音节信息，包含文本内容和时间范围。
@@ -29,28 +27,20 @@ impl SyllableInfo {
     }
 }
 
-/// 完整音节信息，由多个 [`SyllableInfo`] 子项组成，并缓存聚合属性。
+/// 完整音节信息，由多个 [`SyllableInfo`] 子项组成。
+///
+/// 聚合文本与首尾时间始终由子项即时推导，因此直接修改 [`FullSyllableInfo::sub_items`]
+/// 不会让任何派生值失效。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FullSyllableInfo {
     /// 子音节列表
     pub sub_items: Vec<SyllableInfo>,
-    #[serde(skip)]
-    cached_text: RefCell<Option<String>>,
-    #[serde(skip)]
-    cached_start_time: Cell<Option<i32>>,
-    #[serde(skip)]
-    cached_end_time: Cell<Option<i32>>,
 }
 
 impl FullSyllableInfo {
-    /// 创建新的完整音节信息，初始缓存为空。
+    /// 创建新的完整音节信息。
     pub fn new(sub_items: Vec<SyllableInfo>) -> Self {
-        Self {
-            sub_items,
-            cached_text: RefCell::new(None),
-            cached_start_time: Cell::new(None),
-            cached_end_time: Cell::new(None),
-        }
+        Self { sub_items }
     }
 
     /// 返回子音节列表的只读切片。
@@ -64,64 +54,38 @@ impl FullSyllableInfo {
     }
 
     /// 返回子音节列表的可变引用。
-    ///
-    /// 修改后必须调用 [`FullSyllableInfo::refresh_properties`]，否则缓存的聚合属性会失效。
     pub fn sub_items_mut(&mut self) -> &mut Vec<SyllableInfo> {
         &mut self.sub_items
     }
 
-    /// 替换子音节列表并刷新缓存。
+    /// 替换子音节列表。
     pub fn set_sub_items(&mut self, sub_items: Vec<SyllableInfo>) {
         self.sub_items = sub_items;
-        self.refresh_properties();
     }
 
-    /// 追加子音节并刷新缓存。
+    /// 追加子音节。
     pub fn extend_sub_items(&mut self, items: impl IntoIterator<Item = SyllableInfo>) {
         self.sub_items.extend(items);
-        self.refresh_properties();
     }
 
-    /// 返回所有子音节拼接后的完整文本（带缓存）。
+    /// 返回所有子音节拼接后的完整文本。
     pub fn text(&self) -> String {
-        if let Some(ref t) = *self.cached_text.borrow() {
-            return t.clone();
-        }
-        let t: String = self.sub_items.iter().map(|s| s.text.as_str()).collect();
-        *self.cached_text.borrow_mut() = Some(t.clone());
-        t
+        get_text_from_syllable_list(&self.sub_items)
     }
 
-    /// 返回第一个子音节的开始时间（带缓存），无子音节时返回 0。
+    /// 返回第一个子音节的开始时间，无子音节时返回 0。
     pub fn start_time(&self) -> i32 {
-        if let Some(t) = self.cached_start_time.get() {
-            return t;
-        }
-        let t = self.sub_items.first().map(|s| s.start_time).unwrap_or(0);
-        self.cached_start_time.set(Some(t));
-        t
+        self.sub_items.first().map_or(0, |s| s.start_time)
     }
 
-    /// 返回最后一个子音节的结束时间（带缓存），无子音节时返回 0。
+    /// 返回最后一个子音节的结束时间，无子音节时返回 0。
     pub fn end_time(&self) -> i32 {
-        if let Some(t) = self.cached_end_time.get() {
-            return t;
-        }
-        let t = self.sub_items.last().map(|s| s.end_time).unwrap_or(0);
-        self.cached_end_time.set(Some(t));
-        t
+        self.sub_items.last().map_or(0, |s| s.end_time)
     }
 
     /// 返回总持续时长（毫秒）。
     pub fn duration(&self) -> i32 {
         self.end_time() - self.start_time()
-    }
-
-    /// 清除所有缓存属性，使其在下次访问时重新计算。
-    pub fn refresh_properties(&self) {
-        *self.cached_text.borrow_mut() = None;
-        self.cached_start_time.set(None);
-        self.cached_end_time.set(None);
     }
 }
 
@@ -264,12 +228,55 @@ pub fn add_offset_to_syllable_items(syllables: &mut [SyllableItem], offset: i32)
                 s.end_time -= offset;
             }
             SyllableItem::Full(f) => {
-                for sub in f.sub_items_mut().iter_mut() {
+                for sub in f.sub_items_mut() {
                     sub.start_time -= offset;
                     sub.end_time -= offset;
                 }
-                f.refresh_properties();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{LineInfo, LyricsData};
+
+    /// 歌词模型不含内部可变性，可以跨线程共享（0.3.2 起）。
+    #[test]
+    fn model_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<SyllableInfo>();
+        assert_send_sync::<FullSyllableInfo>();
+        assert_send_sync::<SyllableItem>();
+        assert_send_sync::<LineInfo>();
+        assert_send_sync::<LyricsData>();
+    }
+
+    /// 聚合值由子音节即时推导，直接改 `sub_items` 也不会读到过期结果。
+    #[test]
+    fn aggregates_follow_sub_items() {
+        let mut full = FullSyllableInfo::new(vec![
+            SyllableInfo::new("He".to_string(), 0, 100),
+            SyllableInfo::new("llo".to_string(), 100, 300),
+        ]);
+        assert_eq!(full.text(), "Hello");
+        assert_eq!(
+            (full.start_time(), full.end_time(), full.duration()),
+            (0, 300, 300)
+        );
+
+        full.sub_items_mut()
+            .push(SyllableInfo::new("!".to_string(), 300, 350));
+        assert_eq!(full.text(), "Hello!");
+        assert_eq!(
+            (full.start_time(), full.end_time(), full.duration()),
+            (0, 350, 350)
+        );
+
+        let empty = FullSyllableInfo::new(Vec::new());
+        assert_eq!(empty.text(), "");
+        assert_eq!((empty.start_time(), empty.end_time()), (0, 0));
     }
 }

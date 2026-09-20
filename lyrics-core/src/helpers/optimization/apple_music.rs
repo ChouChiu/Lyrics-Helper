@@ -20,10 +20,6 @@ use super::utf16::{
 
 /// 预处理歌词列表。
 pub fn prepare_lyrics(lines: &mut [LineInfo]) {
-    if lines.is_empty() {
-        return;
-    }
-
     for line in lines.iter_mut() {
         prepare_lyrics_line(line);
     }
@@ -131,10 +127,6 @@ fn remove_redundant_translations(line: &mut LineInfo, is_background: bool) {
 /// - 去掉换行、Trim + 折叠空白；
 /// - 背景人声额外去掉外层括号（半角/全角），只处理“首尾括号包裹”的情况。
 fn normalize_for_compare(s: &str, is_background: bool) -> String {
-    if s.is_empty() {
-        return String::new();
-    }
-
     let s = s.replace(['\r', '\n'], "");
     let s = collapse_whitespace(&s);
 
@@ -148,16 +140,12 @@ fn normalize_for_compare(s: &str, is_background: bool) -> String {
 
 /// 裁剪首尾音节的空白。
 fn trim_boundary_whitespaces(syllables: &mut [SyllableItem]) {
-    if syllables.is_empty() {
-        return;
+    if let Some(first) = syllables.first_mut() {
+        trim_boundary_safe(first, Edge::Start);
     }
-
-    // ---- TrimStart on first syllable ----
-    trim_boundary_safe(&mut syllables[0], Edge::Start);
-
-    // ---- TrimEnd on last syllable ----
-    let last = syllables.len() - 1;
-    trim_boundary_safe(&mut syllables[last], Edge::End);
+    if let Some(last) = syllables.last_mut() {
+        trim_boundary_safe(last, Edge::End);
+    }
 }
 
 /// 裁剪音节的哪一侧空白。
@@ -187,16 +175,8 @@ fn trim_boundary_safe(syllable: &mut SyllableItem, edge: Edge) {
                 Edge::End => sub_items.last_mut(),
             };
 
-            let mut changed = false;
             if let Some(item) = edge_item {
-                let trimmed = trim(&item.text, edge);
-                if trimmed != item.text {
-                    item.text = trimmed.to_string();
-                    changed = true;
-                }
-            }
-            if changed {
-                fi.refresh_properties();
+                item.text = trim(&item.text, edge).to_string();
             }
         }
     }
@@ -247,11 +227,9 @@ fn split_into_tokens(text: &str, start_time: i32, end_time: i32) -> Vec<Syllable
     }
 
     // 加权分配时间：含中文/日文 token 权重=1；拉丁 token 权重=字母数字数(>=1)
+    // `token_weight` 恒 >= 1，因此 `w_sum >= tokens.len() >= 2`。
     let weights: Vec<i32> = tokens.iter().map(|t| token_weight(t)).collect();
-    let mut w_sum: i32 = weights.iter().sum();
-    if w_sum <= 0 {
-        w_sum = tokens.len() as i32;
-    }
+    let w_sum: i32 = weights.iter().sum();
 
     let total = end_time - start_time;
     if total <= 0 {
@@ -459,10 +437,6 @@ impl CaseCounts {
 /// 全篇以全大写为主时先整体小写再按句首大写；以全小写为主时只做句首大写；
 /// 两者都不占主导（阈值 0.9）时不做任何处理。
 pub fn capitalization_normalization(lines: &mut [LineInfo]) {
-    if lines.is_empty() {
-        return;
-    }
-
     // 1) 逐行分类
     let mut counts = CaseCounts::default();
 
@@ -502,42 +476,30 @@ pub fn capitalization_normalization(lines: &mut [LineInfo]) {
 
 /// 判断一行的大小写类型。
 fn get_line_case_kind(s: &str) -> LineCaseKind {
-    if s.is_empty() {
-        return LineCaseKind::NoLettersOrMixed;
-    }
-
     let mut has_upper = false;
     let mut has_lower = false;
-    let mut has_letter = false;
 
     for unit in s.encode_utf16() {
-        if !is_letter_unit(unit) {
-            continue;
-        }
-
-        has_letter = true;
         if is_upper_unit(unit) {
             has_upper = true;
         } else if is_lower_unit(unit) {
             has_lower = true;
+        } else {
+            continue;
         }
 
+        // 大小写并存即为混用，无需继续扫描。
         if has_upper && has_lower {
             return LineCaseKind::NoLettersOrMixed;
         }
     }
 
-    if !has_letter {
-        return LineCaseKind::NoLettersOrMixed;
+    match (has_upper, has_lower) {
+        (true, false) => LineCaseKind::AllUpper,
+        (false, true) => LineCaseKind::AllLower,
+        // 没有字母，或只有无大小写之分的字母（如汉字、假名）。
+        _ => LineCaseKind::NoLettersOrMixed,
     }
-    if has_upper && !has_lower {
-        return LineCaseKind::AllUpper;
-    }
-    if has_lower && !has_upper {
-        return LineCaseKind::AllLower;
-    }
-
-    LineCaseKind::NoLettersOrMixed
 }
 
 /// 对一行（含子行）应用大小写规范化。
@@ -640,24 +602,19 @@ fn rewrite_syllable_text_preserve_structure(syllable: &mut SyllableItem, new_tex
 
             let new_units: Vec<u16> = new_text.encode_utf16().collect();
             let mut pos = 0;
-            {
-                let sub_items = fi.sub_items_mut();
-                for item in sub_items.iter_mut() {
-                    let len = item.text.encode_utf16().count();
+            for item in fi.sub_items_mut() {
+                let len = item.text.encode_utf16().count();
 
-                    if len == 0 {
-                        continue;
-                    }
-                    if pos + len > new_units.len() {
-                        break;
-                    }
-
-                    item.text = utf16_slice(&new_units, pos, len);
-                    pos += len;
+                if len == 0 {
+                    continue;
                 }
-            }
+                if pos + len > new_units.len() {
+                    break;
+                }
 
-            fi.refresh_properties();
+                item.text = utf16_slice(&new_units, pos, len);
+                pos += len;
+            }
         }
     }
 }
@@ -667,10 +624,6 @@ fn rewrite_syllable_text_preserve_structure(syllable: &mut SyllableItem, new_tex
 /// 与上游一致：先是（可选的）整体小写，再把句首字母大写，
 /// 并顺带把独立的小写 `i` 修正为 `I`。
 fn normalize_sentence_case_preserve_length(s: &str, lower_first: bool) -> String {
-    if s.is_empty() {
-        return s.to_string();
-    }
-
     // 上游为字符串级的 ToLowerInvariant()（完整大小写映射）
     let src = if lower_first {
         s.to_lowercase()

@@ -64,7 +64,6 @@ fn append_text(item: &mut SyllableItem, text: &str) {
             if let Some(last) = full.sub_items_mut().last_mut() {
                 last.text.push_str(text);
             }
-            full.refresh_properties();
         }
     }
 }

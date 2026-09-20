@@ -190,26 +190,19 @@ pub static TITLE_LINE_INFO_DICT: &[&str] = &[
 ];
 
 /// [`TITLE_LINE_INFO_DICT`] 的小写形式，用于等价于 C# `StringComparison.OrdinalIgnoreCase` 的包含匹配。
-///
-/// 构建时跳过空/空白条目，对应 C# `ContainsAnyKeyword` 中的 `IsNullOrWhiteSpace` 判断。
 static TITLE_LINE_INFO_DICT_LOWER: LazyLock<Vec<String>> = LazyLock::new(|| {
     TITLE_LINE_INFO_DICT
         .iter()
-        .filter(|keyword| !keyword.trim().is_empty())
         .map(|keyword| keyword.to_lowercase())
         .collect()
 });
 
-/// 拆分「标题 - 歌手」式标题的分隔正则，对应 C# `Regex.Split(..., " - ", RegexOptions.IgnoreCase)`。
-/// 署名行标记，对应 C# `InfoLines.IsStringCreditBy` 中的列表（预先小写化）。
-static CREDIT_BY_MARKERS_LOWER: LazyLock<Vec<String>> = LazyLock::new(|| {
-    ["st:", "or:", "Lyrics:", " by:", " By:"]
-        .iter()
-        .filter(|marker| !marker.is_empty())
-        .map(|marker| marker.to_lowercase())
-        .collect()
-});
+/// 署名行标记，对应 C# `InfoLines.IsStringCreditBy` 中的列表。
+///
+/// 上游的 `" by:"` / `" By:"` 在忽略大小写比较下是同一项，这里只保留一份。
+const CREDIT_BY_MARKERS_LOWER: [&str; 4] = ["st:", "or:", "lyrics:", " by:"];
 
+/// 拆分「标题 - 歌手」式标题的分隔正则，对应 C# `Regex.Split(..., " - ", RegexOptions.IgnoreCase)`。
 static TITLE_DASH_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     RegexBuilder::new(" - ")
         .case_insensitive(true)
@@ -230,20 +223,18 @@ pub fn check_info_lines(lines: &[LineInfo], track_info: Option<&TrackMetadata>) 
 
     let start_count = heading_info_lines_count(lines, track_info);
     let end_count = ending_info_lines_count(lines, track_info);
+    let mid_end_exclusive = n.saturating_sub(end_count);
 
-    for flag in flags.iter_mut().take(start_count.min(n)) {
+    for flag in flags.iter_mut().take(start_count) {
         *flag = true;
     }
 
-    for flag in flags.iter_mut().skip(n.saturating_sub(end_count)) {
+    for flag in flags.iter_mut().skip(mid_end_exclusive) {
         *flag = true;
     }
 
     // 中间部分
-    let mid_start = start_count.min(n);
-    let mid_end_exclusive = n.saturating_sub(end_count).min(n);
-
-    for i in mid_start..mid_end_exclusive {
+    for i in start_count..mid_end_exclusive {
         if is_info_line(&get_line_text(&lines[i]), track_info) {
             flags[i] = true;
         }
@@ -383,8 +374,8 @@ pub fn is_info_line(text: &str, track_info: Option<&TrackMetadata>) -> bool {
     }
 
     // 先判冒号：没有冒号时关键词命中与否都不影响结果，可跳过整部字典的扫描。
-    let has_colon = s.contains(':') || s.contains('：');
-    if !has_colon || !contains_any_keyword(s, &TITLE_LINE_INFO_DICT_LOWER) {
+    // （`replace('：', ": ")` 之后全角冒号已不存在，与上游一样只需判半角。）
+    if !s.contains(':') || !contains_any_keyword(s) {
         return is_string_copyright_claiming(s);
     }
 
@@ -399,12 +390,11 @@ fn get_line_text(line: &LineInfo) -> Cow<'_, str> {
     }
 }
 
-/// 文本中是否包含字典中任一关键词（忽略大小写），对应 C# `InfoLines.ContainsAnyKeyword`。
-///
-/// `dict_lower` 为预先小写化的 [`TITLE_LINE_INFO_DICT_LOWER`]。
-fn contains_any_keyword(s: &str, dict_lower: &[String]) -> bool {
+/// 文本中是否包含 [`TITLE_LINE_INFO_DICT`] 的任一关键词（忽略大小写），
+/// 对应 C# `InfoLines.ContainsAnyKeyword`。
+fn contains_any_keyword(s: &str) -> bool {
     let s_lower = s.to_lowercase();
-    dict_lower
+    TITLE_LINE_INFO_DICT_LOWER
         .iter()
         .any(|keyword| s_lower.contains(keyword.as_str()))
 }
@@ -500,7 +490,7 @@ fn looks_like_title_and_artist_line(line: &str, track_info: &TrackMetadata) -> b
         return false;
     }
 
-    let title = track_info.title.clone().unwrap_or_default();
+    let title = track_info.title.as_deref().unwrap_or_default();
     let artist = artist_text(track_info);
 
     let line_norm = line.to_lowercase().replace('’', "'");
@@ -528,8 +518,8 @@ fn looks_like_title_and_artist_line(line: &str, track_info: &TrackMetadata) -> b
         }
     }
 
-    if has_chinese(&title)
-        && line.contains(to_simplified(&title).as_str())
+    if has_chinese(title)
+        && line.contains(to_simplified(title).as_str())
         && line.contains(to_simplified(&artist).as_str())
     {
         return true;
@@ -624,7 +614,7 @@ fn is_string_credit_by(s: &str) -> bool {
 
     if CREDIT_BY_MARKERS_LOWER
         .iter()
-        .any(|marker| s_lower.contains(marker.as_str()))
+        .any(|marker| s_lower.contains(marker))
     {
         return true;
     }

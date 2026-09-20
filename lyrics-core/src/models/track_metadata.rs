@@ -33,7 +33,9 @@ impl TrackMetadata {
 
     /// 返回 Spotify URI（格式为 `spotify:track:{id}`），无 ID 时返回 `None`。
     pub fn spotify_uri(&self) -> Option<String> {
-        self.spotify_id.as_ref().map(|id| format!("spotify:track:{}", id))
+        self.spotify_id
+            .as_ref()
+            .map(|id| format!("spotify:track:{}", id))
     }
 
     /// 若 `artists` 列表为空，则从逗号分隔的 `artist` 字段拆分填充。
@@ -49,7 +51,8 @@ impl TrackMetadata {
     pub fn ensure_album_artists(&mut self) {
         if self.album_artists.is_none() {
             if let Some(ref album_artist) = self.album_artist {
-                self.album_artists = Some(album_artist.split(", ").map(|s| s.to_string()).collect());
+                self.album_artists =
+                    Some(album_artist.split(", ").map(|s| s.to_string()).collect());
             }
         }
     }

@@ -15,55 +15,27 @@ fn add_offset_to_line(line: &mut LineInfo, offset: i32) {
         LineInfo::Line {
             start_time,
             end_time,
-            sub_line,
             ..
-        } => {
-            if let Some(st) = start_time {
-                *st -= offset;
-            }
-            if let Some(et) = end_time {
-                *et -= offset;
-            }
-            if let Some(sub) = sub_line {
-                add_offset_to_line(sub, offset);
-            }
         }
-        LineInfo::Syllable {
-            syllables,
-            sub_line,
-            ..
-        } => {
-            crate::models::add_offset_to_syllable_items(syllables, offset);
-            if let Some(sub) = sub_line {
-                add_offset_to_line(sub, offset);
-            }
-        }
-        LineInfo::FullLine {
+        | LineInfo::FullLine {
             start_time,
             end_time,
-            sub_line,
             ..
         } => {
-            if let Some(st) = start_time {
-                *st -= offset;
+            if let Some(start) = start_time {
+                *start -= offset;
             }
-            if let Some(et) = end_time {
-                *et -= offset;
-            }
-            if let Some(sub) = sub_line {
-                add_offset_to_line(sub, offset);
+            if let Some(end) = end_time {
+                *end -= offset;
             }
         }
-        LineInfo::FullSyllable {
-            syllables,
-            sub_line,
-            ..
-        } => {
+        LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } => {
             crate::models::add_offset_to_syllable_items(syllables, offset);
-            if let Some(sub) = sub_line {
-                add_offset_to_line(sub, offset);
-            }
         }
+    }
+
+    if let Some(sub) = line.sub_line_mut() {
+        add_offset_to_line(sub, offset);
     }
 }
 
