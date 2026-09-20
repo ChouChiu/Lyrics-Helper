@@ -28,7 +28,14 @@
 
 use std::collections::HashMap;
 
-use crate::models::{FullSyllableInfo, LineInfo, SyllableInfo, SyllableItem};
+use crate::helpers::string_helper::collapse_whitespace;
+use crate::models::{FullSyllableInfo, LineInfo, LyricsAlignment, SyllableInfo, SyllableItem};
+
+/// 联合署名写下的一位表演者与另一位之间的分隔符。
+const LABEL_SEPARATORS: [char; 5] = ['/', '&', ',', '，', '、'];
+
+/// 转录写「两人一起唱」的几种叫法。
+const JOINT_LABELS: [&str; 5] = ["both", "all", "合唱", "齐唱", "合"];
 
 /// 括号短语最晚可以在它回答的那一行之后多久开始（毫秒）。
 ///
@@ -36,6 +43,172 @@ use crate::models::{FullSyllableInfo, LineInfo, SyllableInfo, SyllableItem};
 /// 《Saddle Up》的伴唱在那一行留出的停顿之后才起，晚了一秒半。两秒足够吸收这种停顿，
 /// 又不会够到后面另一段的括号句。
 const ECHO_GAP_MS: i32 = 2_000;
+
+/// 把 `lines` 里的说话人标签读成每一行的分边。
+///
+/// 标签得点到 `artists` 里的某一位——就是提供这批歌词的那一方署名的那几位，所以一句歌词
+/// 里普通的冒号不会被当成标签。独占一行的标签给它后面的行定下分边，标签本身被删掉；写在行
+/// 里的标签从显示文本与逐词时间里都去掉。
+///
+/// 分边按 [`LyricsAlignment`] 写：署名里排第一的那位是左，其余是右；合唱、合、Both、All
+/// 这类标签把这一段交回第一个声部，与下游把两人一起唱的一段交回主声部的处理一致。任何一行
+/// 都没有标签时，本函数不改动 `alignment` —— 转录什么都没说，就不替它说话。
+pub fn apply_speaker_labels(lines: &mut Vec<LineInfo>, artists: &[String]) {
+    let mut current_alignment = LyricsAlignment::Unspecified;
+
+    lines.retain_mut(|line| {
+        let text = line.text_from_any();
+        if let Some((alignment, content_start)) = speaker_label(&text, artists) {
+            current_alignment = alignment;
+            strip_speaker_label(line, content_start, text[..content_start].chars().count());
+        }
+        // 一行都没有标签时不动它原来的分边（解析器可能已经写过）。
+        if current_alignment != LyricsAlignment::Unspecified {
+            set_alignment(line, current_alignment);
+        }
+        !is_blank(line)
+    });
+}
+
+/// 读出一个说话人标签，它可能一次署名好几位表演者。
+///
+/// 联合署名的写法是主唱在前，所以标签点到的第一位也是提供方列出来的表演者决定分边：一起
+/// 唱的一段归署名里靠前的那位。点到一位就够了，这样提供方没列进歌手表的那位客串可以跟着
+/// 旁边的名字一起进来。一个名字都没点、只说两人一起唱的标签由 [`is_joint_label`] 交给主声部。
+fn speaker_label(text: &str, artists: &[String]) -> Option<(LyricsAlignment, usize)> {
+    let (colon_start, colon) = text
+        .char_indices()
+        .find(|(_, character)| matches!(character, ':' | '：'))?;
+    let label = text[..colon_start].trim();
+    if label.is_empty() {
+        return None;
+    }
+
+    let after_colon = colon_start + colon.len_utf8();
+    let content = text[after_colon..].trim_start();
+    let content_start = text.len() - content.len();
+
+    // 一个名字都没点到的标签说两人一起唱，它打开的那一行跟点了名字的那一行一样读。
+    if is_joint_label(label) {
+        return Some((LyricsAlignment::Left, content_start));
+    }
+
+    let leading = label.split(LABEL_SEPARATORS).find_map(|name| {
+        let name = normalize_artist(name);
+        artists
+            .iter()
+            .position(|artist| !name.is_empty() && name == normalize_artist(artist))
+    })?;
+
+    let alignment = if leading == 0 {
+        LyricsAlignment::Left
+    } else {
+        LyricsAlignment::Right
+    };
+    Some((alignment, content_start))
+}
+
+/// 返回 `label` 是否说它打开的那些行由两人一起唱。
+///
+/// 把一首歌分给两位表演者的转录，把分边写成点到其中一位的标签，而两人一起唱的一段写成点到
+/// 两位的标签；提供方对这种段落没有名字时写 `Both：`——《Save Your Tears (Remix)》的最后
+/// 一段副歌就是这样交回两人手上的。这样的一段属于主声部，也就是 AMLL 歌词库给两人一起唱的
+/// 副歌的那一边。
+fn is_joint_label(label: &str) -> bool {
+    JOINT_LABELS.contains(&normalize_artist(label).as_str())
+}
+
+/// 从一行里去掉说话人标签。
+///
+/// `content_start` 是标签之后那段内容在文本里的字节下标，`characters` 是它前面有几个字符：
+/// 文本按字节切，词按字符去。
+fn strip_speaker_label(line: &mut LineInfo, content_start: usize, characters: usize) {
+    match line {
+        LineInfo::Line { text, .. } | LineInfo::FullLine { text, .. } => {
+            text.drain(..content_start);
+        }
+        LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } => {
+            strip_leading_characters(syllables, characters);
+        }
+    }
+}
+
+/// 去掉音节列表开头的几个字符，连因此空掉的词一起。
+fn strip_leading_characters(items: &mut Vec<SyllableItem>, characters: usize) {
+    let mut remaining = characters;
+    items.retain_mut(|item| {
+        if remaining == 0 {
+            return true;
+        }
+        let count = item_characters(item);
+        if remaining >= count {
+            remaining -= count;
+            return false;
+        }
+        strip_item_leading(item, remaining);
+        remaining = 0;
+        true
+    });
+}
+
+/// 从一个音节项开头去掉几个字符（合并音节从它的第一个子音节去掉）。
+fn strip_item_leading(item: &mut SyllableItem, characters: usize) {
+    let mut remaining = characters;
+    for part in item.parts_mut() {
+        if remaining == 0 {
+            break;
+        }
+        let count = part.text.chars().count();
+        if remaining >= count {
+            part.text.clear();
+            remaining -= count;
+            continue;
+        }
+        let byte_offset = part
+            .text
+            .char_indices()
+            .nth(remaining)
+            .map_or(part.text.len(), |(index, _)| index);
+        part.text.drain(..byte_offset);
+        remaining = 0;
+    }
+}
+
+/// 设置一行的分边，子行跟着它一起（子行与主行由同一位唱）。
+fn set_alignment(line: &mut LineInfo, alignment: LyricsAlignment) {
+    line.set_alignment(alignment);
+    if let Some(sub_line) = line.sub_line_mut() {
+        sub_line.set_alignment(alignment);
+    }
+}
+
+/// 返回这一行是否一个字符都没写（音节行看它的词）。
+fn is_blank(line: &LineInfo) -> bool {
+    match line {
+        LineInfo::Line { text, .. } | LineInfo::FullLine { text, .. } => text.trim().is_empty(),
+        LineInfo::Syllable { .. } | LineInfo::FullSyllable { .. } => {
+            !line.syllables().unwrap_or_default().iter().any(has_text)
+        }
+    }
+}
+
+/// 归一化歌手名或点到某个歌手的标签。
+///
+/// 提供方的署名与它写在歌词里的标签在大小写、空格和标点上都不一样，所以只比字母与数字。
+fn normalize_artist(value: &str) -> String {
+    let cleaned: String = value
+        .to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    collapse_whitespace(&cleaned)
+}
 
 /// 切开一个括号短语，把它变成它所在行的背景和声。
 ///
@@ -1076,5 +1249,152 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text_from_any(), "（Ella ella）");
         assert!(lines[0].sub_line().is_none());
+    }
+
+    /// 提供方为这首歌署名的歌手。
+    fn artists(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    #[test]
+    fn a_joint_label_takes_its_side_from_the_performer_it_names_first() {
+        // QQ 音乐用联合署名的标签分开《Problem》，其中一次点了 Big Sean，而提供方并没有把他
+        // 列成歌手。
+        let mut lines = vec![
+            line(0, Some(500), "Iggy Azalea/Ariana Grande：", Vec::new()),
+            line(1_000, Some(2_000), "Uh-huh it's Iggy", Vec::new()),
+            line(2_000, Some(2_500), "Big Sean/Ariana Grande：", Vec::new()),
+            line(3_000, Some(4_000), "One less problem", Vec::new()),
+        ];
+
+        apply_speaker_labels(&mut lines, &artists(&["Ariana Grande", "Iggy Azalea"]));
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text_from_any(), "Uh-huh it's Iggy");
+        assert_eq!(lines[0].alignment(), LyricsAlignment::Right);
+        assert_eq!(lines[1].text_from_any(), "One less problem");
+        assert_eq!(lines[1].alignment(), LyricsAlignment::Left);
+    }
+
+    #[test]
+    fn a_label_naming_nobody_on_the_record_is_not_a_label() {
+        let mut lines = vec![line(
+            1_000,
+            Some(2_000),
+            "Big Sean/Some Guy: line",
+            vec![
+                syllable(1_000, 1_500, "Big Sean/Some Guy: "),
+                syllable(1_500, 2_000, "line"),
+            ],
+        )];
+
+        apply_speaker_labels(&mut lines, &artists(&["Ariana Grande", "Iggy Azalea"]));
+
+        assert_eq!(lines[0].text_from_any(), "Big Sean/Some Guy: line");
+        assert_eq!(
+            lines[0].alignment(),
+            LyricsAlignment::Unspecified,
+            "一个歌手都没点到的标签不给这一行定分边"
+        );
+    }
+
+    #[test]
+    fn an_inline_label_leaves_the_word_timing_behind() {
+        let mut lines = vec![line(
+            1_000,
+            Some(2_000),
+            "Doja Cat: sing it",
+            vec![
+                syllable(1_000, 1_200, "Doja "),
+                syllable(1_200, 1_500, "Cat: "),
+                syllable(1_500, 2_000, "sing it"),
+            ],
+        )];
+
+        apply_speaker_labels(&mut lines, &artists(&["Doja Cat", "SZA"]));
+
+        assert_eq!(lines[0].text_from_any(), "sing it");
+        assert_eq!(lines[0].alignment(), LyricsAlignment::Left);
+        assert_eq!(texts(&lines[0]), vec!["sing it"]);
+    }
+
+    #[test]
+    fn a_second_performer_switches_the_voice() {
+        let mut lines = vec![
+            line(0, Some(1_000), "The Weeknd：", Vec::new()),
+            line(1_000, Some(2_000), "I can't feel my face", Vec::new()),
+            line(2_000, Some(3_000), "Take my hand", Vec::new()),
+        ];
+
+        apply_speaker_labels(&mut lines, &artists(&["Ariana Grande", "The Weeknd"]));
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].alignment(), LyricsAlignment::Right);
+        assert_eq!(lines[1].alignment(), LyricsAlignment::Right);
+    }
+
+    #[test]
+    fn a_sung_colon_without_a_label_keeps_the_line() {
+        let mut lines = vec![line(0, Some(1_000), "Love: it hurts", Vec::new())];
+
+        apply_speaker_labels(&mut lines, &artists(&["Ariana Grande"]));
+
+        assert_eq!(lines[0].text_from_any(), "Love: it hurts");
+        assert_eq!(lines[0].alignment(), LyricsAlignment::Unspecified);
+    }
+
+    #[test]
+    fn a_joint_label_gives_its_part_back_to_the_main_voice() {
+        // 《Save Your Tears (Remix)》把主歌分给两位表演者，把最后一段副歌交给两人，QQ 音乐
+        // 给这一段写了它自己的标签。
+        let mut lines = vec![
+            line(0, Some(500), "The Weeknd：", Vec::new()),
+            line(
+                1_000,
+                Some(2_000),
+                "I saw you dancing in a crowded room",
+                Vec::new(),
+            ),
+            line(2_000, Some(2_500), "Ariana Grande：", Vec::new()),
+            line(
+                3_000,
+                Some(4_000),
+                "Met you once under a Pisces moon",
+                Vec::new(),
+            ),
+            line(4_000, Some(4_500), "Both：", Vec::new()),
+            line(
+                5_000,
+                Some(6_000),
+                "I don't know why I run away",
+                Vec::new(),
+            ),
+        ];
+
+        apply_speaker_labels(&mut lines, &artists(&["The Weeknd", "Ariana Grande"]));
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].alignment(), LyricsAlignment::Left);
+        assert_eq!(lines[1].alignment(), LyricsAlignment::Right);
+        assert_eq!(
+            (lines[2].text_from_any().as_str(), lines[2].alignment()),
+            ("I don't know why I run away", LyricsAlignment::Left),
+            "两人一起唱的一段交回第一个声部"
+        );
+    }
+
+    #[test]
+    fn a_joint_label_written_in_chinese_gives_its_part_back_to_the_main_voice() {
+        // 中文转录把同一件事写成 `合：` 或 `合唱：`，独占一行或在两人唱的词前面。
+        let mut lines = vec![
+            line(0, Some(500), "合：", Vec::new()),
+            line(1_000, Some(2_000), "合唱：我们一起走吧", Vec::new()),
+        ];
+
+        apply_speaker_labels(&mut lines, &artists(&["某人"]));
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text_from_any(), "我们一起走吧");
+        assert_eq!(lines[0].alignment(), LyricsAlignment::Left);
     }
 }
