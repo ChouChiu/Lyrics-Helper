@@ -242,7 +242,7 @@ mod tests {
     use super::*;
     use crate::models::{LineInfo, LyricsData};
 
-    /// 歌词模型不含内部可变性，可以跨线程共享（0.3.2 起）。
+    /// 歌词模型不含内部可变性，可以跨线程共享（0.4.0 起）。
     #[test]
     fn model_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}

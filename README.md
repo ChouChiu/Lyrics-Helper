@@ -70,7 +70,7 @@ cargo add lyrics-helper --no-default-features
 
 | | |
 |---|---|
-| [0.3.1 → 0.3.2](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.3.2) | 移除聚合缓存、LRCLIB 结构合并、KRC 解密修复 |
+| [0.3 → 0.4](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.4) | 移除聚合缓存、LRCLIB 结构合并、KRC 解密修复 |
 | [0.2 → 0.3](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.3) | 搜索层改为类型化错误、`SyllableItem` 相等语义移除 |
 | [0.1 → 0.2](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.2) | 音节模型改为 `SyllableItem` |
 
