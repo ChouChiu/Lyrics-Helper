@@ -3,12 +3,13 @@
 //! QRC、LRC、KRC、YRC 都没有「这一段是第二个声部」「这一句是背景和声」这样的字段——转录
 //! 者是把它们写进文本里的：行内括号短语是背景和声（网易云《Umbrella》开头
 //! `Ahuh Ahuh （Yea Rihanna）`），`歌手名：` 开头的行或独占一行的标签是对唱分边，逗号
-//! 结尾的行由下一行续上。这里把这三件事读出来，填进 [`LineInfo`] 本来就有的 `alignment`
-//! 与 `sub_line`。
+//! 结尾的行由下一行续上。这里把这三件事读出来，填进 [`LineInfo`] 本来就有的 `sub_line`
+//! 与 `alignment`（对应下游的 `background` 与 `voice`：署名里第一位是左、其余是右）。
 //!
 //! 三条约定都只认转录明写的东西：对唱标签必须点到该曲目的歌手之一，匹配不上的标签与时间
 //! 重叠都不构成第二个声部的证据；括号里要有字母或数字才是被唱出来的一句；行尾的标点与
-//! 大小写说了句子是否继续。宁可漏判，也不瞎判。
+//! 大小写说了句子是否继续。宁可漏判，也不瞎判。`pronunciation` 不属于这三件事——它是读音
+//! 而不是书写约定，本模块不填它。
 //!
 //! # 由调用方显式调用
 //!
@@ -19,12 +20,45 @@
 //!
 //! 建议的顺序：
 //!
-//! 1. `apply_speaker_labels`——只有标签的行要赶在被丢掉之前把分边读出来，而分边决定了
+//! 1. [`apply_speaker_labels`]——只有标签的行要赶在被丢掉之前把分边读出来，而分边决定了
 //!    后面「同一侧才合并」的判断；
-//! 2. `split_background_vocals`——要在逐词时间被合并成单词之前切开括号短语；
-//! 3. 配对翻译——这时每一行只带着自己那一行的翻译；
-//! 4. `fold_bracketed_echoes`——独占一行的括号短语先收下属于它的翻译，再并进它回答的那一行；
-//! 5. `merge_continued_lines`——最后把断句的行并成一行，连各自的翻译一起并上。
+//! 2. [`split_background_vocals`]——要在逐词时间被合并成单词之前切开括号短语；
+//! 3. 配对翻译——这时每一行只带着自己那一行的翻译（[`unwrap_brackets`] 用来去掉短语译文
+//!    外面的括号）；
+//! 4. [`fold_bracketed_echoes`]——独占一行的括号短语先收下属于它的翻译，再并进它回答的那
+//!    一行；
+//! 5. [`merge_continued_lines`]——最后把断句的行并成一行，连各自的翻译一起并上。
+//!
+//! # 示例
+//!
+//! ```
+//! use lyrics_core::helpers::conventions::{apply_speaker_labels, split_background_vocals};
+//! use lyrics_core::{LineInfo, LyricsAlignment, SyllableInfo};
+//!
+//! // 转录写下来的样子：独占一行的标签，加上一行里带括号短语的歌词。
+//! let mut lines = vec![
+//!     LineInfo::new_line("某某：".to_string(), Some(0), None),
+//!     LineInfo::new_syllable_with_time(
+//!         vec![
+//!             SyllableInfo::new("Hold ".to_string(), 1_000, 1_500).into(),
+//!             SyllableInfo::new("on (ohyeah)".to_string(), 1_500, 2_500).into(),
+//!         ],
+//!         Some(1_000),
+//!         None,
+//!     ),
+//! ];
+//!
+//! apply_speaker_labels(&mut lines, &["某某".to_string()]);
+//! split_background_vocals(&mut lines);
+//!
+//! assert_eq!(lines.len(), 1, "只有标签的那一行被删掉了");
+//! assert_eq!(lines[0].text_from_any(), "Hold on");
+//! assert_eq!(lines[0].alignment(), LyricsAlignment::Left);
+//! assert_eq!(
+//!     lines[0].sub_line().map(LineInfo::text_from_any).as_deref(),
+//!     Some("ohyeah")
+//! );
+//! ```
 
 use std::collections::HashMap;
 
@@ -36,6 +70,20 @@ const LABEL_SEPARATORS: [char; 5] = ['/', '&', ',', '，', '、'];
 
 /// 转录写「两人一起唱」的几种叫法。
 const JOINT_LABELS: [&str; 5] = ["both", "all", "合唱", "齐唱", "合"];
+
+/// 转录把一句话留着没说完的几种标点。
+const OPEN_MARKS: [char; 7] = [',', '，', '、', ';', '；', ':', '：'];
+
+/// 续上的那一行最晚可以在它所续的那一行之后多久开始（毫秒）。
+///
+/// 这里所有材料里写成续句的行都在它所续的那一行的一百毫秒之内开始，而在一行下面重复的
+/// 副歌是每半秒一行。
+const CONTINUATION_GAP_MS: i32 = 250;
+
+/// 说前一句话已经说完的标点。
+const CLOSING_MARKS: [char; 13] = [
+    '.', '。', '!', '！', '?', '？', '…', '"', '“', '”', ')', '）', '】',
+];
 
 /// 括号短语最晚可以在它回答的那一行之后多久开始（毫秒）。
 ///
@@ -758,6 +806,188 @@ fn trim_end_of_last_word(items: &mut [SyllableItem]) {
     }
 }
 
+/// 把一句话断开写的几行并进开始这句话的那一行。
+///
+/// 一行写不下的转录者把这句话剩下的部分写在它后面那一行，断在哪里由行的长度决定：
+/// 《Saddle Up》先写 `But I had enough,` 再写 `so I move onto the next thing`，先写
+/// `Put your money` 再写 `where your mouth is`，后一行都定在它所续的那一行唱完的时刻。
+/// 几行是一句话，所以这里把它们并成渲染时画出来的那一行。
+///
+/// 后面那一行说的是什么，决定它属不属于前面那一行：以小写词开头的行把句子接下去，因为
+/// 转录者开始新的一句时用大写。英文的 `I` 在它是这句话所依靠的那个词时大写，而它自己
+/// 起一句的时候也一样多，所以它只在前面那一行把标点留着没合上时才接下去，就像
+/// `A tragedy, Ms. RIP,` 那样。前面那一行得说得出这件事：被标点合上的行结束了它那一句，
+/// 而结尾是没有大小写的文字的行什么都不说，因为那种语言的转录者断在行写不下的地方，
+/// 而不是句子结束的地方。前面那一行只用最后一个字母的大小写说了话时，时间也得说同样的话：
+/// 给每个词都计时的转录把续句写成从它所续的那一行的最后一个词开始，所以跟前面那一行时间
+/// 分开的行是它自己的一行——《WDA (Whole Different Animal)》的副歌先写
+/// `She a Whole Different Animal` 再写 `different animal`，晚了半秒、还带着自己的译文，
+/// 两行都留着。
+///
+/// 这件事在译文配对之后做，因为在那之前一行带着的是它自己那一行的译文；也在括号回声被并走
+/// 之后做，这样一行所回答的那句短语留在它原来写的地方。
+pub fn merge_continued_lines(lines: &mut Vec<LineInfo>) {
+    let mut index = 0;
+    while index + 1 < lines.len() {
+        if !continues(&lines[index], &lines[index + 1]) {
+            index += 1;
+            continue;
+        }
+        // 一句话可能断不止一次，所以接过一行的行要再看一次，而不是跨过去。
+        let tail = lines.remove(index + 1);
+        let head = std::mem::replace(&mut lines[index], LineInfo::new_line_simple(String::new()));
+        lines[index] = join_continuation(head, tail);
+    }
+}
+
+/// 返回 `tail` 是不是 `first` 开始的那句话剩下的部分。
+fn continues(first: &LineInfo, tail: &LineInfo) -> bool {
+    let text = first.text_from_any();
+    let Some(last) = text.trim_end().chars().next_back() else {
+        return false;
+    };
+    // 被标点合上的行说它那一句结束了，后面跟着什么都一样。
+    if CLOSING_MARKS.contains(&last) {
+        return false;
+    }
+    // 一行用留着的标点说这句话还要继续，或者用转录者选了大小的那个字母说；没有大小写的
+    // 文字断在行写不下的地方，什么都没说。
+    let left_open = OPEN_MARKS.contains(&last);
+    let sentence_goes_on = left_open || has_case(last);
+    first.alignment() == tail.alignment()
+        // 一行只带一个背景和声，把两句并起来就会丢掉其中一个。
+        && !(first.sub_line().is_some() && tail.sub_line().is_some())
+        // 接起来的一行用的词是两行各自的词，所以只有两行写法相同（都逐词计时或都只有行级
+        // 时间，文字才拼得一样）时才接。
+        && is_word_timed(first) == is_word_timed(tail)
+        // 留着没合上的标点是它自己的证据，不管后面那一行的时间；只用大小写说话的行，只有
+        // 在紧接它唱完的地方开始的那一行才接得下去。
+        && (left_open || follows_flush(first, tail))
+        && opens_a_continuation(tail.text_from_any().trim_start(), sentence_goes_on, left_open)
+}
+
+/// 返回 `tail` 是否从它所续的那一行唱完的地方开始。
+///
+/// 给每个词都计时的转录把续句写成从它所续的那一行的最后一个词开始——《Saddle Up》的
+/// `where your mouth is` 从 `Put your money` 结束的地方开始——所以跟前面那一行时间分开的
+/// 行是它自己的一行：《WDA (Whole Different Animal)》的副歌先写
+/// `She a Whole Different Animal` 再写 `different animal`，晚了半秒、还带着自己的译文，
+/// 那是这句吟唱的另一行而不是它的续句。只有行级时间的那一行关于它写下的后一行什么都没说，
+/// 那就只看大小写。
+fn follows_flush(first: &LineInfo, tail: &LineInfo) -> bool {
+    let ends_at = latest_time_ms(first);
+    if ends_at == first.start_time().unwrap_or_default() {
+        return true;
+    }
+    tail.start_time()
+        .is_some_and(|start| start <= ends_at.saturating_add(CONTINUATION_GAP_MS))
+}
+
+/// 返回 `text` 是否以把句子接下去的词开头。
+///
+/// `sentence_goes_on` 是它前面那一行有没有说这句话还要继续，`left_open` 是它有没有用留着
+/// 的标点这么说。
+fn opens_a_continuation(text: &str, sentence_goes_on: bool, left_open: bool) -> bool {
+    let mut characters = text.chars();
+    match characters.next() {
+        Some(first) if first.is_lowercase() => sentence_goes_on,
+        // 英文的 `I` 自己起一句跟接一句一样多，所以只有说这句话还要继续的标点才算数。
+        Some('I') => left_open && matches!(characters.next(), None | Some(' ' | '\'' | '’')),
+        _ => false,
+    }
+}
+
+/// 返回 `character` 是不是转录者选了大小的字母。
+fn has_case(character: char) -> bool {
+    character.is_uppercase() || character.is_lowercase()
+}
+
+/// 把一句话剩下的部分接到开始它的那一行上。
+///
+/// 一行的读法是在解析之后、按这里并完的样子生成的，所以只把转录说了的东西带过来。
+fn join_continuation(mut first: LineInfo, mut tail: LineInfo) -> LineInfo {
+    let end_time = Some(latest_time_ms(&first).max(latest_time_ms(&tail)));
+
+    // 一句话的文字是两行各自的文字接起来的：视图画的是词流，所以接的是词。
+    match &mut first {
+        LineInfo::Line { text, .. } | LineInfo::FullLine { text, .. } => {
+            *text = format!("{} {}", text.trim_end(), tail.text_from_any().trim_start());
+        }
+        LineInfo::Syllable { syllables, .. } | LineInfo::FullSyllable { syllables, .. } => {
+            continue_words(syllables, take_syllables(&mut tail));
+        }
+    }
+
+    // 一行带着自己那一行的译文，所以接起来的一句话带着两句的译文。拼音不像译文那样接起来
+    // （下游也不接）：接起来的一行保留第一行原有的拼音。
+    let tail_translations = take_translations(&mut tail);
+    if !tail_translations.is_empty() {
+        let merged = join_translations(take_translations(&mut first), tail_translations);
+        set_translations(&mut first, merged);
+    }
+
+    // 回声是接着它回答的那句话写的，所以它跟着这句话一起并过去。
+    if first.sub_line().is_none() {
+        first.set_sub_line(tail.take_sub_line());
+    }
+    set_end_time(&mut first, end_time);
+    first
+}
+
+/// 把译文写到行上（不是 Full 变体的行升级为 Full 变体，拼音保持不变）。
+fn set_translations(line: &mut LineInfo, translations: HashMap<String, String>) {
+    match line {
+        LineInfo::FullLine {
+            translations: existing,
+            ..
+        }
+        | LineInfo::FullSyllable {
+            translations: existing,
+            ..
+        } => *existing = translations,
+        other => {
+            let owned = std::mem::replace(other, LineInfo::new_line_simple(String::new()));
+            *other = owned.to_full_line(translations, None);
+        }
+    }
+}
+
+/// 把两行的译文按语言接成一句（某一行的某一种语言空着时就不接）。
+fn join_translations(
+    mut first: HashMap<String, String>,
+    tail: HashMap<String, String>,
+) -> HashMap<String, String> {
+    for (language, text) in tail {
+        match first.get(&language) {
+            Some(piece) => {
+                let joined = join_pieces([piece.clone(), text]).unwrap_or_default();
+                first.insert(language, joined);
+            }
+            None => {
+                first.insert(language, text);
+            }
+        }
+    }
+    first
+}
+
+/// 取走一行的译文。
+fn take_translations(line: &mut LineInfo) -> HashMap<String, String> {
+    line.translations_mut()
+        .map(std::mem::take)
+        .unwrap_or_default()
+}
+
+/// 把一句话结束的时刻写到行上。
+fn set_end_time(line: &mut LineInfo, end_time: Option<i32>) {
+    match line {
+        LineInfo::Line { end_time: end, .. }
+        | LineInfo::Syllable { end_time: end, .. }
+        | LineInfo::FullLine { end_time: end, .. }
+        | LineInfo::FullSyllable { end_time: end, .. } => *end = end_time,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1251,6 +1481,39 @@ mod tests {
         assert!(lines[0].sub_line().is_none());
     }
 
+    /// 一行逐词时间：把 `text` 的词从 `start_ms` 到 `end_ms` 均匀计时。
+    ///
+    /// 《Saddle Up》的转录给每一行的每个词都计了时，断句的行就是这么接起来的。
+    fn word_timed_line(start_ms: i32, end_ms: i32, text: &str) -> LineInfo {
+        let words = text.split(' ').collect::<Vec<_>>();
+        let last = words.len() - 1;
+        let step = (end_ms - start_ms) / words.len() as i32;
+        let syllables = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| {
+                let word_start = start_ms + step * index as i32;
+                let word_end = if index == last {
+                    end_ms
+                } else {
+                    word_start + step
+                };
+                let text = if index == last {
+                    (*word).to_string()
+                } else {
+                    format!("{word} ")
+                };
+                syllable(word_start, word_end, &text)
+            })
+            .collect();
+        line(start_ms, Some(end_ms), text, syllables)
+    }
+
+    /// 一个背景和声（只看文本的用例用它占位）。
+    fn echo(text: &str) -> LineInfo {
+        LineInfo::new_line(text.to_string(), Some(0), None)
+    }
+
     /// 提供方为这首歌署名的歌手。
     fn artists(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_string()).collect()
@@ -1396,5 +1659,258 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text_from_any(), "我们一起走吧");
         assert_eq!(lines[0].alignment(), LyricsAlignment::Left);
+    }
+
+    #[test]
+    fn a_sentence_broken_at_a_comma_is_joined_into_one_line() {
+        // 《Saddle Up》把 `Don't be shy, come and drive me crazy` 写成两行，后一行定在
+        // 前一行唱完的时刻。
+        let mut lines = vec![
+            word_timed_line(194_619, 195_413, "Don't be shy,"),
+            word_timed_line(195_413, 196_999, "come and drive me crazy"),
+        ];
+        lines[0] = with_chinese(lines[0].clone(), "不要害羞");
+        lines[1] = with_chinese(lines[1].clone(), "让我陷入疯狂");
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 1, "两行是一句话");
+        assert_eq!(
+            lines[0].text_from_any(),
+            "Don't be shy, come and drive me crazy"
+        );
+        assert_eq!(
+            lines[0].chinese_translation(),
+            Some("不要害羞 让我陷入疯狂"),
+            "每一行的译文跟着它自己那一行"
+        );
+        assert_eq!(
+            texts(&lines[0]),
+            vec![
+                "Don't ", "be ", "shy, ", "come ", "and ", "drive ", "me ", "crazy"
+            ],
+            "这句话的词是两行各自画出来的词"
+        );
+        assert_eq!(lines[0].start_time(), Some(194_619));
+        assert_eq!(lines[0].end_time(), Some(196_999));
+    }
+
+    #[test]
+    fn the_english_pronoun_carries_the_rest_of_a_sentence() {
+        let mut lines = vec![
+            word_timed_line(108_000, 108_582, "A tragedy, Ms. RIP,"),
+            word_timed_line(108_582, 109_800, "I came for a reason"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].text_from_any(),
+            "A tragedy, Ms. RIP, I came for a reason"
+        );
+    }
+
+    #[test]
+    fn the_rest_of_a_sentence_is_joined_without_punctuation_at_the_break() {
+        // 《Saddle Up》把 `Put your money` 与 `where your mouth is` 写成两行：断在行写不下的
+        // 地方，而不是某个标点处。
+        let mut lines = vec![
+            word_timed_line(197_804, 198_300, "Put your money"),
+            word_timed_line(198_300, 199_100, "where your mouth is"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].text_from_any(),
+            "Put your money where your mouth is"
+        );
+        assert_eq!(lines[0].end_time(), Some(199_100));
+    }
+
+    #[test]
+    fn a_hook_timed_apart_from_the_row_before_it_keeps_its_rows() {
+        // 《WDA (Whole Different Animal)》把副歌写成每半秒一行、彼此隔着一个停顿，并且每一行
+        // 都有自己的译文；只有一句话剩下的部分才从它所续的那一行唱完的地方开始。
+        let mut lines = vec![
+            word_timed_line(28_415, 29_417, "She a Whole Different Animal"),
+            word_timed_line(29_953, 30_779, "different animal"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2, "两行是副歌，不是一句话");
+    }
+
+    #[test]
+    fn a_row_the_punctuation_left_open_is_joined_however_late_it_is_timed() {
+        // 《LEMONADE》的行之间隔着一秒，而前一行结尾的逗号说的正是这句话还要继续，所以时间
+        // 对它们没有话说。
+        let mut lines = vec![
+            word_timed_line(39_491, 39_991, "Like zip,"),
+            word_timed_line(40_572, 40_984, "I don't care"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text_from_any(), "Like zip, I don't care");
+    }
+
+    #[test]
+    fn a_line_timed_payload_joins_its_rows_by_case_alone() {
+        // 只有行级时间的一行没有结束时间，所以它关于后面那一行什么时候开始什么都没说，
+        // 能读的只有字母的大小写。
+        let mut lines = vec![
+            line(1_000, None, "Put your money", Vec::new()),
+            line(5_000, None, "where your mouth is", Vec::new()),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    fn a_sentence_the_punctuation_closed_keeps_its_rows() {
+        let mut lines = vec![
+            word_timed_line(0, 1_000, "I'm not your enemy."),
+            word_timed_line(1_000, 2_000, "i already know"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2, "前一行说它那一句已经说完");
+    }
+
+    #[test]
+    fn the_english_pronoun_begins_a_sentence_without_the_punctuation_to_carry_on() {
+        // 什么都没说的一行把决定权交给后面那一行，而 `I` 跟任何大写的词一样什么都没说——
+        // 16 Bit 把 `These days` 与 `I can't picture my face` 写成两行。
+        let mut lines = vec![
+            word_timed_line(0, 1_000, "These days"),
+            word_timed_line(1_000, 2_000, "I can't picture my face"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn a_row_in_a_script_without_letter_case_says_nothing_about_the_sentence() {
+        // 只有行级时间的一份歌词写 `[00:01.00]こんにちは世界` 再写 `[00:05.00]bye`：小写那一行
+        // 前面的一行结尾是没有大小写的文字，所以它关于句子是否继续什么都没说，后面那一行自成
+        // 一行。
+        let mut lines = vec![
+            line(1_000, Some(3_000), "こんにちは世界", Vec::new()),
+            line(3_000, Some(5_000), "bye", Vec::new()),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn a_row_that_begins_a_sentence_keeps_its_own_line() {
+        let mut lines = vec![
+            word_timed_line(158_851, 159_400, "Boy, Saddle Up,"),
+            word_timed_line(159_400, 160_800, "Don't waste my time"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2, "大写的词自己起一句");
+    }
+
+    #[test]
+    fn a_script_without_letter_case_keeps_its_rows() {
+        let mut lines = vec![
+            word_timed_line(148_870, 149_500, "这还远远不够，"),
+            word_timed_line(149_500, 150_600, "我直言不讳"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2, "逗号在那里断开行，而不是把它留着");
+    }
+
+    #[test]
+    fn a_duet_answer_keeps_its_own_row() {
+        let mut lines = vec![
+            word_timed_line(0, 1_000, "hold on,"),
+            word_timed_line(1_000, 2_000, "i got you"),
+        ];
+        set_alignment(&mut lines[1], LyricsAlignment::Right);
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2, "另一位唱的是他自己的一行");
+    }
+
+    #[test]
+    fn a_sentence_broken_twice_is_joined_into_one_line() {
+        let mut lines = vec![
+            word_timed_line(0, 1_000, "Take the reins,"),
+            word_timed_line(1_000, 2_000, "buckle up,"),
+            word_timed_line(2_000, 3_000, "my baby"),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].text_from_any(),
+            "Take the reins, buckle up, my baby"
+        );
+        assert_eq!(lines[0].end_time(), Some(3_000));
+    }
+
+    #[test]
+    fn the_rest_of_a_sentence_keeps_the_echo_it_answers_with() {
+        let mut lines = vec![
+            word_timed_line(194_619, 195_413, "Don't be shy,"),
+            word_timed_line(195_413, 196_999, "come and drive me crazy"),
+        ];
+        lines[1].set_sub_line(Some(Box::new(echo("If you walk it like you talk it"))));
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            background_text(&lines[0]).as_deref(),
+            Some("If you walk it like you talk it"),
+            "回声回答的是它写在下面的那句话"
+        );
+    }
+
+    #[test]
+    fn rows_timed_differently_keep_their_own_lines() {
+        // 只有行级时间的一行没有自己的词，接起来的一行就没法用两行各自的词画出来。
+        let mut lines = vec![
+            word_timed_line(0, 1_000, "hold on,"),
+            line(1_000, Some(2_000), "i got you", Vec::new()),
+        ];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn two_echoes_are_not_joined_into_one_line() {
+        let mut lines = vec![
+            word_timed_line(0, 1_000, "hold on,"),
+            word_timed_line(1_000, 2_000, "i got you"),
+        ];
+        lines[0].set_sub_line(Some(Box::new(echo("yeah"))));
+        lines[1].set_sub_line(Some(Box::new(echo("oh"))));
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2, "一行只带一个背景和声");
     }
 }
