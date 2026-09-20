@@ -91,8 +91,18 @@ let items = to_syllable_items(flat);             // 反向包装
 assert_eq!(items.len(), 1);
 ```
 
-单个音节项也可以用 `parts()` 取到不分配的 `&[SyllableInfo]`。就地修改
-`FullSyllableInfo` 的子音节后，必须调用 `refresh_properties()` 让缓存失效。
+单个音节项也可以用 `parts()` 取到不分配的 `&[SyllableInfo]`。`FullSyllableInfo`
+的文本与首尾时间都由子音节即时推导，直接改 `sub_items` 不需要额外的失效操作。
+
+## 从 0.3.1 升级到 0.3.2
+
+- `FullSyllableInfo` 不再缓存聚合文本与首尾时间，`refresh_properties()` 随之删除。
+  原先需要在改动 `sub_items` 后调用它的地方，现在直接删掉这次调用即可。
+  该类型也因此不再含内部可变性，`LyricsData` 整体变为 `Sync`。
+- LRCLIB 的 `SearchResultItem` 与 `GetLyricResult` 结构完全相同，已合并为 `LyricItem`，
+  两个旧名称保留为类型别名。
+- `soda_music::api::get_detail` 与 `soda_music::api::USER_AGENT` 已删除：
+  前者的返回类型对外不可读，取歌词请用 `soda_music::api::get_lyrics`。
 
 ## 从 0.2 升级到 0.3
 
