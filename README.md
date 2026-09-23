@@ -4,82 +4,105 @@
 [![docs.rs](https://img.shields.io/docsrs/lyrics-helper)](https://docs.rs/lyrics-helper)
 [![license](https://img.shields.io/crates/l/lyrics-helper.svg)](LICENSE)
 
-Rust 歌词工具库：解析、生成、解密、搜索多种歌词格式。从 [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper)（C#）重写而来。
+Rust 歌词处理工具库，提供常见歌词格式的解析、生成、解密以及跨平台在线搜索。移植自 C# 项目 [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper)。
 
-## 安装
+## 功能概览
 
-```bash
-cargo add lyrics-helper
+- **格式解析与生成**：支持 LRC、QRC、KRC、YRC 以及 Lyricify Syllable / Lines 的解析与生成；支持 TTML（含 Apple Music / AMLL 扩展）、Spotify JSON、Musixmatch JSON 的解析。逐字歌词可降级导出为逐行 LRC。
+- **歌词解密**：支持 QQ 音乐 QRC（Triple DES）、酷狗音乐 KRC（XOR）解密，以及网易云音乐 eapi 请求参数加密。
+- **多平台搜索**：支持在网易云音乐、QQ 音乐、酷狗音乐、汽水音乐、Musixmatch、LRCLIB、AMLL TTML DB 搜索歌曲并获取歌词；支持 Spotify 与 Apple Music 的曲目搜索（需启用 `search` feature）。
+
+更多技术细节、外层封装展开与格式转换矩阵见 [项目 Wiki](https://github.com/ChouChiu/Lyrics-Helper/wiki)。
+
+## 安装与配置
+
+在 `Cargo.toml` 中添加依赖：
+
+```toml
+[dependencies]
+lyrics-helper = "0.5.0"
 ```
 
-## 快速开始
+搜索模块依赖 `reqwest` 和 `tokio`，由 `search` feature 控制（默认开启）。若仅需本地歌词解析、生成或解密，可关闭默认特性以保持零网络依赖：
+
+```toml
+[dependencies]
+lyrics-helper = { version = "0.5.0", default-features = false }
+```
+
+## 快速上手
+
+### 1. 格式解析与转换
 
 ```rust
 use lyrics_helper::{generate_string, parse_auto, LyricsTypes};
 
 fn main() {
-    // 自动识别格式（这里是带音节时间的 QRC）
+    // 自动识别歌词格式（以带音节时间的 QRC 为例）
     let qrc = "[0,1500]Hello(0,500) (500,500)World(1000,500)";
-    let data = parse_auto(qrc).unwrap();
+    let data = parse_auto(qrc).expect("解析失败");
 
-    // 逐字歌词降级为逐行 LRC
-    let lrc = generate_string(&data, LyricsTypes::Lrc).unwrap();
+    // 逐字歌词降级生成逐行 LRC
+    let lrc = generate_string(&data, LyricsTypes::Lrc).expect("生成失败");
     println!("{lrc}");
 }
 ```
 
-更多用法见 Wiki 的[快速开始](https://github.com/ChouChiu/Lyrics-Helper/wiki/Getting-Started)。
+### 2. 歌词解密
 
-## 支持的格式
+```rust
+use lyrics_helper::decrypt_qrc;
 
-| 功能 | 格式 |
-|------|------|
-| **解析** | Lyricify Syllable、Lyricify Lines、LRC、QRC、KRC、YRC、TTML、Spotify JSON、Musixmatch JSON、Apple Music JSON |
-| **生成** | Lyricify Syllable、Lyricify Lines、LRC、QRC、KRC、YRC |
-| **解密** | QRC、KRC |
-| **搜索** | QQ 音乐、网易云音乐、酷狗音乐、汽水音乐、Apple Music、Musixmatch、LRCLIB、Spotify、AMLL TTML DB |
+fn main() {
+    // 一段带属性头的 QRC 加密密文（Triple DES + zlib）
+    let encrypted = "61EA2D770702AE2B2B52DA9EDDEC07BB35F01431C529E8AE46B70CD635C127867\
+                     E1AB832ABFF18CF7AABF1313EF7EF537021F03A5E957206";
 
-格式转换有方向性：逐字歌词可以降级为逐行，反过来不行。完整的转换矩阵见
-[支持格式](https://github.com/ChouChiu/Lyrics-Helper/wiki/Supported-Formats)。
+    if let Some(decrypted) = decrypt_qrc(encrypted) {
+        println!("{decrypted}");
+    }
+}
+```
 
-## 离线使用
+### 3. 在线搜索（需要 `search` feature）
 
-搜索功能由 `search` feature 控制（默认开启），会引入 `reqwest` 与 `tokio`。
-只需要解析/生成/解密时可以关掉：
+```rust
+use lyrics_helper::models::TrackMetadata;
+use lyrics_helper::searchers::netease::NeteaseSearcher;
+use lyrics_helper::searchers::search_for_best_result;
 
-```bash
-cargo add lyrics-helper --no-default-features
+#[tokio::main]
+async fn main() {
+    let mut track = TrackMetadata::new();
+    track.title = Some("晴天".to_string());
+    track.artist = Some("周杰伦".to_string());
+    track.ensure_artists();
+
+    match search_for_best_result(&NeteaseSearcher, &track).await {
+        Ok(Some(best)) => println!("匹配到: {} - {}", best.title, best.artist()),
+        Ok(None) => println!("未找到匹配歌曲"),
+        Err(err) => eprintln!("搜索出错: {err}"),
+    }
+}
 ```
 
 ## 文档
 
-完整文档在 [Wiki](https://github.com/ChouChiu/Lyrics-Helper/wiki)，API 详情见 [docs.rs](https://docs.rs/lyrics-helper)。
+技术规范与 API 详情请参阅：
 
-| | |
-|---|---|
-| [快速开始](https://github.com/ChouChiu/Lyrics-Helper/wiki/Getting-Started) | 安装与基本用法 |
-| [支持格式](https://github.com/ChouChiu/Lyrics-Helper/wiki/Supported-Formats) | 各格式详解与转换矩阵 |
-| [API 概览](https://github.com/ChouChiu/Lyrics-Helper/wiki/API-Reference) | 顶层函数、数据结构、枚举 |
-| [搜索功能](https://github.com/ChouChiu/Lyrics-Helper/wiki/Search) | 多平台搜索与歌词获取 |
-| [歌词解密](https://github.com/ChouChiu/Lyrics-Helper/wiki/Decryption) | QRC / KRC 解密 |
-| [辅助工具](https://github.com/ChouChiu/Lyrics-Helper/wiki/Helpers) | 类型检测、时间偏移、歌词优化 |
-| [项目架构](https://github.com/ChouChiu/Lyrics-Helper/wiki/Architecture) | 6 个 crate 的划分与依赖 |
-| [开发与构建](https://github.com/ChouChiu/Lyrics-Helper/wiki/Development) | 构建、测试、lint |
-
-### 版本升级
-
-| | |
-|---|---|
-| [0.4.0 → 0.5.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.5) | 音节行新增行时间字段、QRC 与 KRC 保留行头行时长、格式分发改走 `parser_for`/`generator_for`、`xml_utils` 移到 `lyrics_parsers`、`add_offset_to_syllable_items` 移到 `helpers::offset_helper`、`qrc_parser::parse_lyrics_line` 不再返回 `Option`、`SearchError::Http` 与 `base_api` 再导出的类型改为 reqwest 0.13、`Searchers` 新增 `AmllTtmlDb` |
-| [0.3.0 → 0.4.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.4) | 移除聚合缓存、LRCLIB 结构合并、KRC 解密修复 |
-| [0.2.0 → 0.3.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.3) | 搜索层改为类型化错误、`SyllableItem` 相等语义移除 |
-| [0.1.0 → 0.2.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.2) | 音节模型改为 `SyllableItem` |
+- [API 文档 (docs.rs)](https://docs.rs/lyrics-helper)
+- [项目 Wiki](https://github.com/ChouChiu/Lyrics-Helper/wiki)
+  - [支持格式与转换矩阵](https://github.com/ChouChiu/Lyrics-Helper/wiki/Supported-Formats)
+  - [搜索平台与接口说明](https://github.com/ChouChiu/Lyrics-Helper/wiki/Search)
+  - [歌词解密](https://github.com/ChouChiu/Lyrics-Helper/wiki/Decryption)
+  - [辅助工具（时间偏移、类型检测、歌词优化）](https://github.com/ChouChiu/Lyrics-Helper/wiki/Helpers)
+  - [项目架构](https://github.com/ChouChiu/Lyrics-Helper/wiki/Architecture)
+  - [版本升级指南](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.5)
 
 ## 致谢
 
-基于 [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper)（C#）重写为 Rust 版本。
-
-逐词 TTML 歌词源来自社区维护的 [AMLL TTML DB](https://github.com/amll-dev/amll-ttml-db)，歌词作者信息见各条目的 `ttml_authors`
+- 基于 [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper)（C#）重写为 Rust 版本。
+- 逐词 TTML 歌词源来自社区维护的 [AMLL TTML DB](https://github.com/amll-dev/amll-ttml-db)。
 
 ## License
 
