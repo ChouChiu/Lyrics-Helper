@@ -1,4 +1,5 @@
 use lyrics_helper::models::TrackMetadata;
+use lyrics_helper::searchers::amll_ttml_db::AmllTtmlDbSearcher;
 use lyrics_helper::searchers::apple_music::AppleMusicSearcher;
 use lyrics_helper::searchers::kugou::KugouSearcher;
 use lyrics_helper::searchers::lrclib::LRCLIBSearcher;
@@ -30,6 +31,7 @@ async fn main() {
         ("Spotify", &spotify),
         ("Apple Music", &apple_music),
         ("LRCLIB", &LRCLIBSearcher),
+        ("AMLL TTML DB", &AmllTtmlDbSearcher),
     ];
 
     println!("=== 搜索 'Bang Bang - Jessie J' ===\n");

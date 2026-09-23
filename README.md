@@ -37,7 +37,7 @@ fn main() {
 | **解析** | Lyricify Syllable、Lyricify Lines、LRC、QRC、KRC、YRC、TTML、Spotify JSON、Musixmatch JSON、Apple Music JSON |
 | **生成** | Lyricify Syllable、Lyricify Lines、LRC、QRC、KRC、YRC |
 | **解密** | QRC、KRC |
-| **搜索** | QQ 音乐、网易云音乐、酷狗音乐、汽水音乐、Apple Music、Musixmatch、LRCLIB、Spotify |
+| **搜索** | QQ 音乐、网易云音乐、酷狗音乐、汽水音乐、Apple Music、Musixmatch、LRCLIB、Spotify、AMLL TTML DB |
 
 格式转换有方向性：逐字歌词可以降级为逐行，反过来不行。完整的转换矩阵见
 [支持格式](https://github.com/ChouChiu/Lyrics-Helper/wiki/Supported-Formats)。
@@ -70,7 +70,7 @@ cargo add lyrics-helper --no-default-features
 
 | | |
 |---|---|
-| [0.4.0 → 0.5.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.5) | 音节行新增行时间字段、QRC 与 KRC 保留行头行时长、格式分发改走 `parser_for`/`generator_for`、`xml_utils` 移到 `lyrics_parsers`、`add_offset_to_syllable_items` 移到 `helpers::offset_helper`、`qrc_parser::parse_lyrics_line` 不再返回 `Option`、`SearchError::Http` 与 `base_api` 再导出的类型改为 reqwest 0.13 |
+| [0.4.0 → 0.5.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.5) | 音节行新增行时间字段、QRC 与 KRC 保留行头行时长、格式分发改走 `parser_for`/`generator_for`、`xml_utils` 移到 `lyrics_parsers`、`add_offset_to_syllable_items` 移到 `helpers::offset_helper`、`qrc_parser::parse_lyrics_line` 不再返回 `Option`、`SearchError::Http` 与 `base_api` 再导出的类型改为 reqwest 0.13、`Searchers` 新增 `AmllTtmlDb` |
 | [0.3.0 → 0.4.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.4) | 移除聚合缓存、LRCLIB 结构合并、KRC 解密修复 |
 | [0.2.0 → 0.3.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.3) | 搜索层改为类型化错误、`SyllableItem` 相等语义移除 |
 | [0.1.0 → 0.2.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.2) | 音节模型改为 `SyllableItem` |
@@ -78,6 +78,8 @@ cargo add lyrics-helper --no-default-features
 ## 致谢
 
 基于 [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper)（C#）重写为 Rust 版本。
+
+逐词 TTML 歌词源来自社区维护的 [AMLL TTML DB](https://github.com/amll-dev/amll-ttml-db)，歌词作者信息见各条目的 `ttml_authors`
 
 ## License
 

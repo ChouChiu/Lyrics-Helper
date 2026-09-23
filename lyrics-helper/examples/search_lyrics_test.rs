@@ -1,8 +1,9 @@
 use lyrics_helper::models::{LyricsRawTypes, TrackMetadata};
 use lyrics_helper::search::providers::web::{
-    kugou, lrclib, musixmatch, netease, qq_music, soda_music,
+    amll_ttml_db, kugou, lrclib, musixmatch, netease, qq_music, soda_music,
 };
 use lyrics_helper::searchers::Searchers;
+use lyrics_helper::searchers::amll_ttml_db::AmllTtmlDbSearcher;
 use lyrics_helper::searchers::apple_music::AppleMusicSearcher;
 use lyrics_helper::searchers::kugou::KugouSearcher;
 use lyrics_helper::searchers::lrclib::LRCLIBSearcher;
@@ -37,6 +38,7 @@ async fn main() {
         ("Spotify", &spotify),
         ("Apple Music", &apple_music),
         ("LRCLIB", &LRCLIBSearcher),
+        ("AMLL TTML DB", &AmllTtmlDbSearcher),
     ];
 
     struct SearchResultWithPlatform {
@@ -184,6 +186,14 @@ async fn main() {
                     }
                 }
             }
+            Searchers::AmllTtmlDb => match amll_ttml_db::api::get_raw_lyrics(&r.id).await {
+                Ok(lyric) => lyric,
+                Err(error) => {
+                    println!("  ❌ 获取歌词失败: {error}");
+                    println!();
+                    continue;
+                }
+            },
             Searchers::SodaMusic => match soda_music::api::get_lyrics(&r.id).await {
                 Ok((lyric, trans)) => {
                     if let Some(t) = &trans {

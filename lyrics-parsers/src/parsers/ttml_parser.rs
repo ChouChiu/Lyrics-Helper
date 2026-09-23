@@ -87,6 +87,55 @@ struct TranslationValue {
     span_texts: Vec<String>,
 }
 
+/// 行内用 `ttm:role` 标出的译文与音译（AMLL TTML 的写法，Apple 把它们放在 `<head>` 里）。
+#[derive(Default)]
+struct InlineNotes {
+    translations: HashMap<String, String>,
+    pronunciation: Option<String>,
+}
+
+/// 一个 `<p>` 里收集到的主行、背景人声音节及各自的行内译文与音译。
+#[derive(Default)]
+struct LineParts {
+    main: Vec<SyllableInfo>,
+    bg: Vec<SyllableInfo>,
+    main_notes: InlineNotes,
+    bg_notes: InlineNotes,
+}
+
+impl LineParts {
+    fn syllables(&mut self, is_bg: bool) -> &mut Vec<SyllableInfo> {
+        if is_bg { &mut self.bg } else { &mut self.main }
+    }
+
+    fn notes(&mut self, is_bg: bool) -> &mut InlineNotes {
+        if is_bg {
+            &mut self.bg_notes
+        } else {
+            &mut self.main_notes
+        }
+    }
+}
+
+/// 行内标注的种类，这类 span 的文字不属于歌词正文。
+enum InlineRole {
+    Translation,
+    Roman,
+}
+
+impl InlineRole {
+    fn from_role(role: Option<&str>) -> Option<Self> {
+        let role = role?;
+        if role.eq_ignore_ascii_case("x-translation") {
+            Some(Self::Translation)
+        } else if role.eq_ignore_ascii_case("x-roman") {
+            Some(Self::Roman)
+        } else {
+            None
+        }
+    }
+}
+
 enum XmlNode {
     Element {
         name: String,
@@ -243,9 +292,14 @@ pub fn parse_with_options(ttml: &str, use_embedded_simplified_chinese_lyrics: bo
 
         let key = attr_value(p_attrs, "key");
 
-        let mut main_syllables = Vec::new();
-        let mut bg_syllables = Vec::new();
-        collect_syllables_from_nodes(p_children, &mut main_syllables, &mut bg_syllables, false);
+        let mut parts = LineParts::default();
+        collect_syllables_from_nodes(p_children, &mut parts, false);
+        let LineParts {
+            main: main_syllables,
+            bg: mut bg_syllables,
+            main_notes,
+            bg_notes,
+        } = parts;
 
         let mut line: Option<LineInfo> = None;
 
@@ -255,9 +309,7 @@ pub fn parse_with_options(ttml: &str, use_embedded_simplified_chinese_lyrics: bo
         } else {
             let begin = attr_value(p_attrs, "begin").and_then(|v| parse_time_ms(&v));
             let end = attr_value(p_attrs, "end").and_then(|v| parse_time_ms(&v));
-            let text = normalize_text(&element_text_value(p_children))
-                .trim()
-                .to_string();
+            let text = normalize_text(&lyric_text(p_children)).trim().to_string();
 
             if !text.is_empty() {
                 if let Some(begin_ms) = begin {
@@ -309,6 +361,12 @@ pub fn parse_with_options(ttml: &str, use_embedded_simplified_chinese_lyrics: bo
                     line.set_alignment(align);
                 }
             }
+        }
+
+        // `<head>` 里的译文优先，行内标注只补上它没有的语言。
+        apply_inline_notes(&mut line, main_notes);
+        if let Some(sub) = line.sub_line_mut() {
+            apply_inline_notes(sub, bg_notes);
         }
 
         lines.push(line);
@@ -370,16 +428,32 @@ fn element_text_value(nodes: &[XmlNode]) -> String {
     s
 }
 
-fn collect_syllables_from_nodes(
-    nodes: &[XmlNode],
-    main: &mut Vec<SyllableInfo>,
-    bg: &mut Vec<SyllableInfo>,
-    is_bg_context: bool,
-) {
+/// 行文本（不含行内译文与音译）。
+fn lyric_text(nodes: &[XmlNode]) -> String {
+    let mut s = String::new();
+    for node in nodes {
+        match node {
+            XmlNode::Text(t) => s.push_str(t),
+            XmlNode::Element {
+                attributes,
+                children,
+                ..
+            } => {
+                let role = attr_value(attributes, "role");
+                if InlineRole::from_role(role.as_deref()).is_none() {
+                    s.push_str(&lyric_text(children));
+                }
+            }
+        }
+    }
+    s
+}
+
+fn collect_syllables_from_nodes(nodes: &[XmlNode], parts: &mut LineParts, is_bg_context: bool) {
     for node in nodes {
         match node {
             XmlNode::Text(text) => {
-                append_to_previous(text, if is_bg_context { &mut *bg } else { &mut *main });
+                append_to_previous(text, parts.syllables(is_bg_context));
             }
             XmlNode::Element {
                 name,
@@ -388,6 +462,26 @@ fn collect_syllables_from_nodes(
             } => {
                 if local_name(name) == "span" {
                     let role = attr_value(attributes, "role");
+                    if let Some(inline_role) = InlineRole::from_role(role.as_deref()) {
+                        let text = normalize_spaces(&element_text_value(children));
+                        if !text.is_empty() {
+                            let notes = parts.notes(is_bg_context);
+                            match inline_role {
+                                InlineRole::Translation => {
+                                    let lang = attr_value(attributes, "lang").unwrap_or_default();
+                                    notes
+                                        .translations
+                                        .entry(normalize_lang_key(&lang))
+                                        .or_insert(text);
+                                }
+                                InlineRole::Roman => {
+                                    notes.pronunciation.get_or_insert(text);
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
                     let is_bg = is_bg_context
                         || role
                             .as_deref()
@@ -401,7 +495,7 @@ fn collect_syllables_from_nodes(
                             .or(begin_ms);
 
                         if let Some(b) = begin_ms {
-                            let target = if is_bg { &mut *bg } else { &mut *main };
+                            let target = parts.syllables(is_bg);
                             let raw = move_leading_spaces_to_previous(
                                 &normalize_text(&element_text_value(children)),
                                 target,
@@ -411,10 +505,10 @@ fn collect_syllables_from_nodes(
                             }
                         }
                     } else {
-                        collect_syllables_from_nodes(children, main, bg, is_bg);
+                        collect_syllables_from_nodes(children, parts, is_bg);
                     }
                 } else {
-                    collect_syllables_from_nodes(children, main, bg, is_bg_context);
+                    collect_syllables_from_nodes(children, parts, is_bg_context);
                 }
             }
         }
@@ -1075,6 +1169,35 @@ fn apply_subtitle_translations(mut line: LineInfo, subtitles: &[(String, String)
     }
 }
 
+/// 把行内译文与音译写到行上，行已有的译文与音译不被覆盖。
+fn apply_inline_notes(line: &mut LineInfo, notes: InlineNotes) {
+    if notes.translations.is_empty() && notes.pronunciation.is_none() {
+        return;
+    }
+    if !line.is_full() {
+        let owned = std::mem::replace(line, LineInfo::new_line_simple(String::new()));
+        *line = owned.to_full_line(HashMap::new(), None);
+    }
+    if let LineInfo::FullLine {
+        translations,
+        pronunciation,
+        ..
+    }
+    | LineInfo::FullSyllable {
+        translations,
+        pronunciation,
+        ..
+    } = line
+    {
+        for (lang, text) in notes.translations {
+            translations.entry(lang).or_insert(text);
+        }
+        if pronunciation.is_none() {
+            *pronunciation = notes.pronunciation;
+        }
+    }
+}
+
 fn apply_bg_translations_to_subline(sub: &mut LineInfo, bg_dict: &HashMap<String, String>) {
     match sub {
         LineInfo::Syllable {
@@ -1241,6 +1364,38 @@ mod tests {
         assert_eq!(syllables[0].text().trim(), "don't");
         assert_eq!(syllables[1].text().trim(), "R&B\u{2019}s");
         assert_eq!(lines[1].text_from_any(), "Tom & Jerry");
+    }
+
+    /// AMLL 把译文与音译写成行内 span，它们不是正文，要落到行（背景人声则是子行）的译文与拼音上。
+    #[test]
+    fn inline_translations_and_romanization_are_not_lyrics() {
+        let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+  <body><div>
+    <p begin="0.0" end="3.0"><span begin="0.0" end="1.0">君</span><span begin="1.0" end="2.0">の</span><span ttm:role="x-bg"><span begin="2.0" end="3.0">(ah)</span><span ttm:role="x-translation" xml:lang="zh-Hans">（啊）</span></span><span ttm:role="x-translation" xml:lang="zh-Hans">你的</span><span ttm:role="x-translation" xml:lang="en">your</span><span ttm:role="x-roman">kimi no</span></p>
+    <p begin="3.0" end="4.0">Hello<span ttm:role="x-translation" xml:lang="zh-CN">你好</span></p>
+  </div></body>
+</tt>"#;
+
+        let lines = parse(ttml).lines.unwrap();
+
+        assert_eq!(lines[0].text_from_any(), "君の");
+        assert_eq!(lines[0].chinese_translation(), Some("你的"));
+        assert_eq!(
+            lines[0]
+                .translations()
+                .unwrap()
+                .get("en")
+                .map(String::as_str),
+            Some("your")
+        );
+        assert_eq!(lines[0].pronunciation(), Some("kimi no"));
+
+        let bg = lines[0].sub_line().expect("应有背景人声子行");
+        assert_eq!(bg.text_from_any(), "(ah)");
+        assert_eq!(bg.chinese_translation(), Some("（啊）"));
+
+        assert_eq!(lines[1].text_from_any(), "Hello");
+        assert_eq!(lines[1].chinese_translation(), Some("你好"));
     }
 
     /// 时长的候选键要逐个尝试：靠前的键取不到值，不能让后面的键失去机会。

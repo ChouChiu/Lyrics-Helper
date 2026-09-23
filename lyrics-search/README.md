@@ -12,6 +12,7 @@
 - Musixmatch
 - LRCLIB
 - Spotify
+- AMLL TTML DB（社区逐词 TTML 歌词库）
 
 ## 依赖
 
@@ -60,6 +61,12 @@ match search_for_best_result(&NeteaseSearcher, &track).await {
 （`cloudsearch/pc`）。前者在海外 IP 下返回加密结果、在风控网络环境下返回 `-460`，两种情况
 都会自动改用 eapi 接口，并记住该选择供后续请求使用（因此首个请求可能比后续请求慢）。
 两个接口都失败时返回第一次尝试的错误。
+
+AMLL TTML DB 只有静态文件：`amll_ttml_db::api::search` 下载仓库的元数据索引（约 1.6 MB，
+缓存一小时，同一首歌只保留最新版本）后在本地按关键词匹配，结果的 `id` 是 `raw-lyrics/` 下的文件名，
+交给 `get_raw_lyrics` 取 TTML；已知平台 ID 时可用 `get_lyrics(Platform, id, Format)` 直接取
+TTML、LRC、YRC、QRC 等格式，没有这首歌时返回 `Ok(None)`。国内访问 GitHub 不畅时可用
+`set_base_url(BIKONOO_BASE_URL)` 等切换到目录结构一致的镜像
 
 搜索结果与运行环境有关：曲目受地区版权限制，海外 IP 通常只能搜到翻唱等条目，
 所以不要对搜索结果做断言。

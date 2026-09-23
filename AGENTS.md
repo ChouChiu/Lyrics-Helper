@@ -17,7 +17,7 @@ lyrics-generators/      # one generator per format: LRC, QRC, KRC, YRC, Lyricify
 lyrics-crypto/          # QRC and KRC decryption (Triple DES / XOR + zlib) behind `LyricsDecrypter`
                         # (`QrcDecrypter`, `KrcDecrypter`) + Netease eapi `params` encryption
                         # (MD5 + AES-128-ECB/PKCS7), depends on flate2+base64+aes+md-5 only
-lyrics-search/          # song search by platform (QQ, Netease, Kugou, Soda, Apple, Musixmatch, LRCLIB, Spotify)
+lyrics-search/          # song search by platform (QQ, Netease, Kugou, Soda, Apple, Musixmatch, LRCLIB, Spotify, AMLL TTML DB)
                         # `error.rs` = crate-level `SearchError`; `providers/` = per-platform HTTP clients
                         # (base_api: send/send_json/send_form + json/text); `searchers/` = Searcher trait + impls
                         # gated behind `search` feature; depends on reqwest+tokio+lyrics-crypto
@@ -71,6 +71,8 @@ cargo run --example demo -- generate lyrics-helper/tests/test_data/QrcDemo.txt q
 - **Search error contract** (0.3.0): `lyrics-search/src/error.rs` 的 `SearchError`（`Http`/`Json`/`Status`/`Api`/`Captcha`/`Payload`/`InvalidConfig`）是搜索层唯一的失败通道；`Searcher` 与各 provider 的可失败入口都返回 `Result<_, SearchError>`。「没有数据」不是错误：`Ok(None)` = 该曲目没有这种歌词，空 `Vec` = 请求成功但没有结果。`base_api` 只有 `send`/`send_json`/`send_form` + `json`/`text` 五个函数，非 2xx 由 `json`/`text` 统一返回 `Status`（要把 404 当「没有这首歌」的调用方须先判 `response.status()`）。
 - **`SyllableItem` 没有 `PartialEq`**（0.3.0 删除了只比时间、忽略文本的实现；上游 C# `ISyllableInfo` 也没有相等语义）。需要按时间比较时显式写 `start_time()`/`end_time()`；`LineInfo` 的 `PartialEq`/`Ord` 只比开始时间，是排序语义（对应上游 `IComparable`），保留不动。
 - **Search feature gating**: `lyrics-search` deps (`reqwest`, `tokio`, `async-trait`, `rand`, `urlencoding`, `base64`) are all `optional = true` behind the `search` feature, and both of its modules (`searchers`, `providers`, `error`) are `#[cfg(feature = "search")]` — without the feature the crate compiles empty. `lyrics-helper` gates the entire `lyrics-search` crate behind its own `search` feature.
+- **AMLL TTML DB provider** (`providers::web::amll_ttml_db`): static files only, no search API. `api::search` downloads `metadata/raw-lyrics-index.jsonl` (cached 1 h per base URL, deduped newest-first by shared platform ID), matches whitespace terms against title/artists/album; result `id` = `raw-lyrics/` file name for `get_raw_lyrics`. `get_lyrics(Platform, id, Format)` fetches per-platform files (404 → `Ok(None)`); `set_base_url` switches to repo-layout mirrors (`BIKONOO_BASE_URL`, `GBCLSTUDIO_BASE_URL`)
+- **TTML inline annotations**: AMLL writes translations/romanisation as `<span ttm:role="x-translation" xml:lang>` / `x-roman` inside `<p>` (and inside `x-bg`). The parser keeps them out of syllables/line text and stores them in `translations`/`pronunciation` of the line or its background sub-line; `<head>` translations (Apple style) take precedence
 - **Musixmatch provider**: `providers::web::musixmatch::api_options::ApiOptions` selects the Android (default) or desktop API; `api::set_options(...) -> Result<(), SearchError>` overrides it globally（非法配置返回 `SearchError::InvalidConfig`，不 panic）。
 
 ## Important details

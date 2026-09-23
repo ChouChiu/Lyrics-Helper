@@ -177,7 +177,7 @@ assert!(a.start_time() == b.start_time() && a.end_time() == b.end_time());
 | **解析** | Lyricify Syllable, Lyricify Lines, LRC, QRC, KRC, YRC, TTML, Spotify JSON, Musixmatch JSON, Apple Music |
 | **生成** | Lyricify Syllable, Lyricify Lines, LRC, QRC, KRC, YRC |
 | **解密** | QRC, KRC |
-| **搜索** | QQ 音乐, 网易云音乐, 酷狗音乐, 汽水音乐, Apple Music, Musixmatch, LRCLIB, Spotify |
+| **搜索** | QQ 音乐, 网易云音乐, 酷狗音乐, 汽水音乐, Apple Music, Musixmatch, LRCLIB, Spotify, AMLL TTML DB |
 
 除上述歌词格式外，`helpers::type_helper` 还能识别 QRC XML、网易云完整 YRC JSON 与 Apple Music API JSON 等原始封装类型：
 

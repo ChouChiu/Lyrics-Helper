@@ -1,3 +1,4 @@
+pub mod amll_ttml_db;
 pub mod apple_music;
 pub mod compare_helper;
 pub mod kugou;
@@ -36,4 +37,6 @@ pub enum Searchers {
     Spotify,
     /// LRCLIB
     LRCLIB,
+    /// AMLL TTML DB
+    AmllTtmlDb,
 }
