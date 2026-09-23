@@ -1,3 +1,4 @@
+use crate::xml_utils::{attribute_value, reference_text};
 use lyrics_core::models::*;
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
@@ -108,63 +109,65 @@ fn attr_value(attrs: &[(String, String)], name: &str) -> Option<String> {
     None
 }
 
-/// 取出元素的标签名与属性列表。
+/// 取出元素的标签名与属性列表（属性值中的实体已还原）。
 fn element_head(start: &BytesStart<'_>) -> (String, Vec<(String, String)>) {
-    let name = String::from_utf8_lossy(start.name().as_ref()).to_string();
+    let name = start.name().as_ref().to_string();
     let attributes = start
         .attributes()
         .flatten()
         .map(|attribute| {
             (
-                String::from_utf8_lossy(attribute.key.as_ref()).to_string(),
-                String::from_utf8_lossy(&attribute.value).to_string(),
+                attribute.key.as_ref().to_string(),
+                attribute_value(&attribute),
             )
         })
         .collect();
     (name, attributes)
 }
 
-fn build_tree(reader: &mut Reader<&[u8]>, end_tag: &[u8]) -> Vec<XmlNode> {
-    let mut nodes = Vec::new();
-    let mut buf = Vec::new();
+/// 把累积的文本作为一个文本节点放入 `nodes`。
+fn flush_text(nodes: &mut Vec<XmlNode>, text: &mut String) {
+    if !text.is_empty() {
+        nodes.push(XmlNode::Text(std::mem::take(text)));
+    }
+}
 
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) => {
-                let (name, attributes) = element_head(e);
-                let children = build_tree(reader, e.name().as_ref());
+fn build_tree(reader: &mut Reader<&[u8]>, end_tag: &str) -> Vec<XmlNode> {
+    let mut nodes = Vec::new();
+    // 实体引用是独立事件，相邻的文本与实体引用拼成同一个文本节点，
+    // 否则 `don&apos;t` 会被拆成三个节点。
+    let mut text = String::new();
+
+    while let Ok(event) = reader.read_event() {
+        match event {
+            Event::Text(e) => text.push_str(&e.xml10_content()),
+            Event::GeneralRef(e) => text.push_str(&reference_text(&e)),
+            Event::Start(e) => {
+                flush_text(&mut nodes, &mut text);
+                let (name, attributes) = element_head(&e);
+                let children = build_tree(reader, &name);
                 nodes.push(XmlNode::Element {
                     name,
                     attributes,
                     children,
                 });
             }
-            Ok(Event::Empty(ref e)) => {
-                let (name, attributes) = element_head(e);
+            Event::Empty(e) => {
+                flush_text(&mut nodes, &mut text);
+                let (name, attributes) = element_head(&e);
                 nodes.push(XmlNode::Element {
                     name,
                     attributes,
                     children: Vec::new(),
                 });
             }
-            Ok(Event::Text(ref e)) => {
-                let text = e.unescape().unwrap_or_default().to_string();
-                if !text.is_empty() {
-                    nodes.push(XmlNode::Text(text));
-                }
-            }
-            Ok(Event::End(ref e)) => {
-                if e.name().as_ref() == end_tag {
-                    break;
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
-            _ => {}
+            Event::End(e) if e.name().as_ref() == end_tag => break,
+            Event::Eof => break,
+            _ => flush_text(&mut nodes, &mut text),
         }
-        buf.clear();
     }
 
+    flush_text(&mut nodes, &mut text);
     nodes
 }
 
@@ -194,7 +197,7 @@ pub fn parse_with_options(ttml: &str, use_embedded_simplified_chinese_lyrics: bo
     }
 
     let mut reader = Reader::from_str(ttml);
-    let doc = build_tree(&mut reader, b"");
+    let doc = build_tree(&mut reader, "");
 
     parse_itunes_metadata(&doc, &mut file, &mut data);
     let translations = parse_translations(&doc);
@@ -1004,6 +1007,8 @@ fn apply_subtitle_translations(mut line: LineInfo, subtitles: &[(String, String)
     match &mut line {
         LineInfo::Syllable {
             syllables,
+            start_time,
+            end_time,
             alignment,
             sub_line,
             ..
@@ -1011,6 +1016,8 @@ fn apply_subtitle_translations(mut line: LineInfo, subtitles: &[(String, String)
             let translations = dict;
             let mut full = LineInfo::FullSyllable {
                 syllables: std::mem::take(syllables),
+                start_time: *start_time,
+                end_time: *end_time,
                 alignment: *alignment,
                 sub_line: sub_line.take(),
                 translations,
@@ -1072,6 +1079,8 @@ fn apply_bg_translations_to_subline(sub: &mut LineInfo, bg_dict: &HashMap<String
     match sub {
         LineInfo::Syllable {
             syllables,
+            start_time,
+            end_time,
             alignment,
             sub_line,
             ..
@@ -1079,6 +1088,8 @@ fn apply_bg_translations_to_subline(sub: &mut LineInfo, bg_dict: &HashMap<String
             let existing = sub_line.take();
             let full = LineInfo::FullSyllable {
                 syllables: std::mem::take(syllables),
+                start_time: *start_time,
+                end_time: *end_time,
                 alignment: *alignment,
                 sub_line: existing,
                 translations: bg_dict.clone(),
@@ -1212,6 +1223,25 @@ fn parse_time_ms(value: &str) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 实体引用在 quick-xml 里是独立事件，要与前后文本拼回同一个音节/同一行。
+    #[test]
+    fn entity_references_stay_inside_their_syllable() {
+        let ttml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+  <body><div>
+    <p begin="0.0" end="2.0"><span begin="0.0" end="1.0">don&apos;t</span> <span begin="1.0" end="2.0">R&amp;B&#x2019;s</span></p>
+    <p begin="2.0" end="3.0">Tom &amp; Jerry</p>
+  </div></body>
+</tt>"#;
+
+        let lines = parse(ttml).lines.unwrap();
+        let syllables = lines[0].syllables().expect("第一行应为逐字行");
+        assert_eq!(syllables.len(), 2);
+        assert_eq!(syllables[0].text().trim(), "don't");
+        assert_eq!(syllables[1].text().trim(), "R&B\u{2019}s");
+        assert_eq!(lines[1].text_from_any(), "Tom & Jerry");
+    }
 
     /// 时长的候选键要逐个尝试：靠前的键取不到值，不能让后面的键失去机会。
     #[test]

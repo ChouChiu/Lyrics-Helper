@@ -1,3 +1,4 @@
+use crate::parsers::lyrics_data;
 use lyrics_core::models::*;
 use serde::Deserialize;
 
@@ -70,19 +71,17 @@ pub fn parse(raw_json: &str) -> Option<LyricsData> {
     };
 
     Some(LyricsData {
-        file: Some(FileInfo {
-            lyrics_type: LyricsTypes::Spotify,
-            sync_types: sync_type,
-            additional_info: Some(AdditionalFileInfo::new_spotify(
-                lyrics.provider.clone(),
-                lyrics.provider_lyrics_id.clone(),
-                lyrics.provider_display_name.clone(),
-                lyrics.language.clone(),
-            )),
-        }),
         lines: Some(parsed_lines),
-        writers: None,
-        track_metadata: None,
+        ..lyrics_data(
+            LyricsTypes::Spotify,
+            sync_type,
+            Some(AdditionalFileInfo::new_spotify(
+                lyrics.provider,
+                lyrics.provider_lyrics_id,
+                lyrics.provider_display_name,
+                lyrics.language,
+            )),
+        )
     })
 }
 

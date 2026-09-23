@@ -1,5 +1,5 @@
 use crate::providers::web::base_api;
-use rand::Rng;
+use rand::RngExt;
 use std::time::Duration;
 
 /// Musixmatch 请求 `t` 参数的生成方式，对应 C# `ApiOptions.RequestIdFactory`。

@@ -3,7 +3,7 @@ use reqwest::Method;
 use super::response::{SearchResponse, TrackDetailResponse};
 use crate::error::SearchError;
 use crate::providers::web::base_api;
-use rand::Rng;
+use rand::RngExt;
 use std::sync::LazyLock;
 
 /// 搜索接口使用的 Android User-Agent。

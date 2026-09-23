@@ -2,7 +2,7 @@
 //!
 //! 各平台 Provider 与 [`Searcher`](crate::searchers::searcher::Searcher) 一律返回本类型，
 //! 调用方据此区分「没有这首歌」「被 captcha」「被限流」「网络不通」等失败原因，
-//! 而不必像 0.2 那样只能从一个 `None` 里猜。
+//! 而不必像 0.2.0 那样只能从一个 `None` 里猜。
 
 use std::fmt;
 

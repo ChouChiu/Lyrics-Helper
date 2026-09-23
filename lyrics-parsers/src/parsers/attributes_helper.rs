@@ -5,15 +5,14 @@ use lyrics_core::models::*;
 /// `ti`/`ar`/`al`/`length` 写入曲目元数据，`offset` 通过 `offset` 参数带出，
 /// `hash` 写入 KRC 的附加信息，其余属性追加到附加信息的属性列表。
 fn apply_attribute(data: &mut LyricsData, key: String, value: String, offset: &mut Option<i32>) {
-    if let Some(meta) = data.track_metadata.as_mut() {
-        match key.as_str() {
-            "ar" => meta.artist = Some(value.clone()),
-            "al" => meta.album = Some(value.clone()),
-            "ti" => meta.title = Some(value.clone()),
-            "length" => meta.duration_ms = value.parse().ok(),
-            "offset" => *offset = value.parse().ok(),
-            _ => {}
-        }
+    let meta = data.track_metadata.get_or_insert_with(TrackMetadata::new);
+    match key.as_str() {
+        "ar" => meta.artist = Some(value.clone()),
+        "al" => meta.album = Some(value.clone()),
+        "ti" => meta.title = Some(value.clone()),
+        "length" => meta.duration_ms = value.parse().ok(),
+        "offset" => *offset = value.parse().ok(),
+        _ => {}
     }
 
     let Some(file) = data.file.as_mut() else {
@@ -47,8 +46,12 @@ pub fn parse_general_attributes_to_lyrics_data_from_lines(
     let mut offset = None;
     data.track_metadata.get_or_insert_with(TrackMetadata::new);
 
-    while lines.first().is_some_and(|line| is_attribute_line(line)) {
-        let (key, value) = get_attribute(&lines.remove(0));
+    let header_len = lines
+        .iter()
+        .position(|line| !is_attribute_line(line))
+        .unwrap_or(lines.len());
+    for line in lines.drain(..header_len) {
+        let (key, value) = get_attribute(&line);
         apply_attribute(data, key, value, &mut offset);
     }
 

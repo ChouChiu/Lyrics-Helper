@@ -30,37 +30,47 @@ pub fn downgrade_line(line: &mut LineInfo) {
     };
     let owned = std::mem::replace(line, placeholder);
 
-    let (syllables, alignment, sub_line, translations, pronunciation) = match owned {
-        LineInfo::Syllable {
-            syllables,
-            alignment,
-            sub_line,
-            ..
-        } => (syllables, alignment, sub_line, None, None),
-        LineInfo::FullSyllable {
-            syllables,
-            alignment,
-            sub_line,
-            translations,
-            pronunciation,
-        } => (
-            syllables,
-            alignment,
-            sub_line,
-            Some(translations),
-            pronunciation,
-        ),
-        other => {
-            *line = other;
-            return;
-        }
-    };
+    let (syllables, start_time, end_time, alignment, sub_line, translations, pronunciation) =
+        match owned {
+            LineInfo::Syllable {
+                syllables,
+                start_time,
+                end_time,
+                alignment,
+                sub_line,
+            } => (
+                syllables, start_time, end_time, alignment, sub_line, None, None,
+            ),
+            LineInfo::FullSyllable {
+                syllables,
+                start_time,
+                end_time,
+                alignment,
+                sub_line,
+                translations,
+                pronunciation,
+            } => (
+                syllables,
+                start_time,
+                end_time,
+                alignment,
+                sub_line,
+                Some(translations),
+                pronunciation,
+            ),
+            other => {
+                *line = other;
+                return;
+            }
+        };
 
     if syllables.is_empty() {
         // 没有音节数据的异常情况：保持原样
         *line = match translations {
             Some(translations) => LineInfo::FullSyllable {
                 syllables,
+                start_time,
+                end_time,
                 alignment,
                 sub_line,
                 translations,
@@ -68,6 +78,8 @@ pub fn downgrade_line(line: &mut LineInfo) {
             },
             None => LineInfo::Syllable {
                 syllables,
+                start_time,
+                end_time,
                 alignment,
                 sub_line,
             },
@@ -76,8 +88,8 @@ pub fn downgrade_line(line: &mut LineInfo) {
     }
 
     let text = LineInfo::text_from_syllables(&syllables);
-    let start_time = syllables.first().map(|s| s.start_time());
-    let end_time = syllables.last().map(|s| s.end_time());
+    let start_time = start_time.or_else(|| syllables.first().map(|s| s.start_time()));
+    let end_time = end_time.or_else(|| syllables.last().map(|s| s.end_time()));
 
     *line = match translations {
         Some(translations) => LineInfo::FullLine {

@@ -1,4 +1,5 @@
-use crate::parsers::attributes_helper;
+use crate::parsers::{apply_offset, lyrics_data, parse_with_attributes};
+use lyrics_core::helpers::string_helper::is_number;
 use lyrics_core::models::*;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -10,93 +11,50 @@ static SYLLABLE_RE: LazyLock<Regex> =
 /// 解析 Lyricify Syllable 格式歌词，支持背景人声检测和对齐信息，返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
     let input = input.trim_start_matches('\u{feff}');
-    let mut lyrics_lines: Vec<String> = input.trim().lines().map(|s| s.to_string()).collect();
-    let mut data = LyricsData {
-        track_metadata: Some(TrackMetadata::new()),
-        file: Some(FileInfo {
-            lyrics_type: LyricsTypes::LyricifySyllable,
-            sync_types: SyncTypes::SyllableSynced,
-            additional_info: Some(AdditionalFileInfo::new_general()),
-        }),
-        lines: None,
-        writers: None,
-    };
-
-    let offset = attributes_helper::parse_general_attributes_to_lyrics_data_from_lines(
-        &mut data,
-        &mut lyrics_lines,
-    );
-    let lines = parse_lyrics(&lyrics_lines, offset);
-    data.lines = Some(lines);
-    data
+    parse_with_attributes(
+        lyrics_data(
+            LyricsTypes::LyricifySyllable,
+            SyncTypes::SyllableSynced,
+            Some(AdditionalFileInfo::new_general()),
+        ),
+        input.trim().lines().map(str::to_string).collect(),
+        parse_lyrics,
+    )
 }
 
 /// 解析 Lyricify Syllable 歌词行列表，处理背景人声和对齐信息，可选地应用时间偏移。
 pub fn parse_lyrics(lines: &[String], offset: Option<i32>) -> Vec<LineInfo> {
-    let mut list: Vec<(LineInfo, Option<bool>)> = Vec::new();
+    let list = lines
+        .iter()
+        .filter_map(|line| parse_lyrics_line_with_state(line))
+        .collect();
 
-    for line in lines {
-        if let Some((item, is_bg)) = parse_lyrics_line_with_state(line) {
-            list.push((item, is_bg));
-        }
-    }
-
-    // Set background vocals
     let mut new_list = set_background_vocals_info(list);
-
-    if let Some(offset_val) = offset {
-        if offset_val != 0 {
-            lyrics_core::helpers::offset_helper::add_offset(&mut new_list, offset_val);
-        }
-    }
-
+    apply_offset(&mut new_list, offset);
     new_list
 }
 
+/// 解析一行，返回歌词行与行头预设里的背景人声标记；没有任何音节的行返回 `None`。
 fn parse_lyrics_line_with_state(line: &str) -> Option<(LineInfo, Option<bool>)> {
-    let mut syllables: Vec<SyllableInfo> = Vec::new();
-    let mut is_background_vocals: Option<bool> = None;
-    let mut alignment = LyricsAlignment::Unspecified;
-
     let line = line.trim_start_matches('\u{feff}');
-    let line_to_parse = if let Some(bracket_pos) = line.find(']') {
-        let properties = &line[..bracket_pos];
-        let mut chars = properties.chars();
-        if chars.next() == Some('[') {
-            let prop_str: String = chars.collect();
-            if lyrics_core::helpers::string_helper::is_number(&prop_str) {
-                if let Ok(p) = prop_str.parse::<i32>() {
-                    // Read preset background vocals
-                    if p >= 6 {
-                        is_background_vocals = Some(true);
-                    } else if p >= 3 {
-                        is_background_vocals = Some(false);
-                    }
-
-                    // Read preset duet view
-                    alignment = match p % 3 {
-                        0 => LyricsAlignment::Unspecified,
-                        1 => LyricsAlignment::Left,
-                        2 => LyricsAlignment::Right,
-                        _ => LyricsAlignment::Unspecified,
-                    };
-                }
-            }
-        }
-        &line[bracket_pos + 1..]
-    } else {
-        line
+    let (preset, body) = match line.split_once(']') {
+        Some((properties, body)) => (properties.strip_prefix('[').and_then(parse_preset), body),
+        None => (None, line),
     };
+    let (is_background_vocals, alignment) = preset.unwrap_or((None, LyricsAlignment::Unspecified));
 
-    for cap in SYLLABLE_RE.captures_iter(line_to_parse) {
-        if cap.len() == 4 {
-            let text = cap[1].to_string();
+    let syllables = SYLLABLE_RE
+        .captures_iter(body)
+        .map(|cap| {
             let start_time: i32 = cap[2].parse().ok()?;
             let duration: i32 = cap[3].parse().ok()?;
-            let end_time = start_time + duration;
-            syllables.push(SyllableInfo::new(text, start_time, end_time));
-        }
-    }
+            Some(SyllableInfo::new(
+                cap[1].to_string(),
+                start_time,
+                start_time + duration,
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
 
     if syllables.is_empty() {
         return None;
@@ -106,6 +64,28 @@ fn parse_lyrics_line_with_state(line: &str) -> Option<(LineInfo, Option<bool>)> 
     line_info.set_alignment(alignment);
 
     Some((line_info, is_background_vocals))
+}
+
+/// 读取行头预设：`0..=2` 为主行、`3..=5` 为非背景人声、`6..` 为背景人声，
+/// 对 3 取余得到对齐方式（0 未指定、1 左、2 右）。
+fn parse_preset(properties: &str) -> Option<(Option<bool>, LyricsAlignment)> {
+    if !is_number(properties) {
+        return None;
+    }
+    let preset: u32 = properties.parse().ok()?;
+
+    let is_background_vocals = match preset {
+        6.. => Some(true),
+        3.. => Some(false),
+        _ => None,
+    };
+    let alignment = match preset % 3 {
+        1 => LyricsAlignment::Left,
+        2 => LyricsAlignment::Right,
+        _ => LyricsAlignment::Unspecified,
+    };
+
+    Some((is_background_vocals, alignment))
 }
 
 fn set_background_vocals_info(list: Vec<(LineInfo, Option<bool>)>) -> Vec<LineInfo> {

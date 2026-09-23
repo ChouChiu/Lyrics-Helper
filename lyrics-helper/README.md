@@ -8,7 +8,7 @@ Rust 歌词工具库，支持解析、生成、解密、搜索多种歌词格式
 
 ```toml
 [dependencies]
-lyrics-helper = "0.3"
+lyrics-helper = "0.5.0"
 ```
 
 自动检测格式并解析歌词：
@@ -57,7 +57,7 @@ cargo run --example demo -- parse lyrics-helper/tests/test_data/LrcDemo.txt lrc
 cargo run --example demo -- generate lyrics-helper/tests/test_data/QrcDemo.txt qrc lrc
 ```
 
-## 从 0.1 升级到 0.2
+## 从 0.1.0 升级到 0.2.0
 
 0.2.0 改变了逐字歌词的音节模型：`LineInfo::Syllable` 与 `LineInfo::FullSyllable`
 的 `syllables` 字段由 `Vec<SyllableInfo>` 变为 `Vec<SyllableItem>`，对应上游 C# 的
@@ -67,11 +67,11 @@ cargo run --example demo -- generate lyrics-helper/tests/test_data/QrcDemo.txt q
 只读取文本或时间的代码改动很小，把字段访问换成同名方法即可：
 
 ```rust
-// 0.1
+// 0.1.0
 let text = &syllables[0].text;
 let start = syllables[0].start_time;
 
-// 0.2
+// 0.2.0
 let text = syllables[0].text();
 let start = syllables[0].start_time();
 ```
@@ -94,7 +94,7 @@ assert_eq!(items.len(), 1);
 单个音节项也可以用 `parts()` 取到不分配的 `&[SyllableInfo]`。就地修改
 `FullSyllableInfo` 的子音节后，必须调用 `refresh_properties()` 让缓存失效。
 
-## 从 0.2 升级到 0.3
+## 从 0.2.0 升级到 0.3.0
 
 0.3.0 是破坏性版本：搜索层改为返回类型化错误，`SyllableItem` 的相等语义被移除。
 
@@ -152,10 +152,10 @@ let items: Vec<SearchResultItem> = base_api::json(response).await.expect("解码
 
 ### `SyllableItem` 不再实现 `PartialEq`
 
-0.2 的 `SyllableItem` 只比较 `start_time`/`end_time`、完全忽略文本，
+0.2.0 的 `SyllableItem` 只比较 `start_time`/`end_time`、完全忽略文本，
 两个文本不同的音节只要时间相同就被判为相等，`contains` / `dedup` / `assert_eq!`
 都会因此给出违反直觉的结果；上游 C# 的 `ISyllableInfo` 本来也没有任何相等语义，
-0.3 直接删掉了这个实现。需要按时间比较时显式写：
+0.3.0 直接删掉了这个实现。需要按时间比较时显式写：
 
 ```rust
 use lyrics_helper::{SyllableInfo, SyllableItem};
@@ -163,7 +163,7 @@ use lyrics_helper::{SyllableInfo, SyllableItem};
 let a = SyllableItem::from(SyllableInfo::new("晴".to_string(), 1000, 1500));
 let b = SyllableItem::from(SyllableInfo::new("天".to_string(), 1000, 1500));
 
-// 0.2 里 a == b 为 true（只比时间），0.3 起没有 PartialEq，必须显式比较
+// 0.2.0 里 a == b 为 true（只比时间），0.3.0 起没有 PartialEq，必须显式比较
 assert!(a.start_time() == b.start_time() && a.end_time() == b.end_time());
 ```
 
@@ -230,7 +230,7 @@ if let Ok((lrc, translation)) = netease::api::get_lyrics(423997333).await {
 搜索功能需要启用 `search` feature（默认启用），依赖 `reqwest` 和 `tokio`。如需纯离线解析库，禁用默认 features：
 
 ```toml
-lyrics-helper = { version = "0.3", default-features = false }
+lyrics-helper = { version = "0.5.0", default-features = false }
 ```
 
 ## 项目架构

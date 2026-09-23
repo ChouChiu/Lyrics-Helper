@@ -70,9 +70,10 @@ cargo add lyrics-helper --no-default-features
 
 | | |
 |---|---|
-| [0.3 → 0.4](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.4) | 移除聚合缓存、LRCLIB 结构合并、KRC 解密修复 |
-| [0.2 → 0.3](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.3) | 搜索层改为类型化错误、`SyllableItem` 相等语义移除 |
-| [0.1 → 0.2](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.2) | 音节模型改为 `SyllableItem` |
+| [0.4.0 → 0.5.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.5) | 音节行新增行时间字段、QRC 与 KRC 保留行头行时长、格式分发改走 `parser_for`/`generator_for`、`xml_utils` 移到 `lyrics_parsers`、`add_offset_to_syllable_items` 移到 `helpers::offset_helper`、`qrc_parser::parse_lyrics_line` 不再返回 `Option`、`SearchError::Http` 与 `base_api` 再导出的类型改为 reqwest 0.13 |
+| [0.3.0 → 0.4.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.4) | 移除聚合缓存、LRCLIB 结构合并、KRC 解密修复 |
+| [0.2.0 → 0.3.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.3) | 搜索层改为类型化错误、`SyllableItem` 相等语义移除 |
+| [0.1.0 → 0.2.0](https://github.com/ChouChiu/Lyrics-Helper/wiki/Migration-0.2) | 音节模型改为 `SyllableItem` |
 
 ## 致谢
 

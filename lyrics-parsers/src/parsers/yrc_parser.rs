@@ -1,3 +1,4 @@
+use crate::parsers::lyrics_data;
 use lyrics_core::models::*;
 use serde::Deserialize;
 
@@ -152,14 +153,9 @@ pub fn parse(input: &str) -> LyricsData {
     lines.extend(tail_credits.iter().map(credits_line));
 
     LyricsData {
-        file: Some(FileInfo {
-            lyrics_type: LyricsTypes::Yrc,
-            sync_types,
-            additional_info: None,
-        }),
         lines: Some(lines),
         writers,
-        track_metadata: None,
+        ..lyrics_data(LyricsTypes::Yrc, sync_types, None)
     }
 }
 

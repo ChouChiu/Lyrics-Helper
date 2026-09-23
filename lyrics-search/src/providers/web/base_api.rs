@@ -5,12 +5,12 @@
 //!
 //! 请求分两步：先由 [`send`] / [`send_json`] / [`send_form`] 发送并拿回原始响应，
 //! 再由 [`json`] / [`text`] 解码响应体。所有失败都返回 [`SearchError`]，
-//! 不再像 0.2 那样把 reqwest / serde 的错误压成 `None`。
+//! 不再像 0.2.0 那样把 reqwest / serde 的错误压成 `None`。
 
 use reqwest::{Client, RequestBuilder};
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::LazyLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::SearchError;
 
@@ -32,20 +32,22 @@ static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
         .expect("Failed to create HTTP client")
 });
 
-/// 当前 Unix 时间戳（秒），取不到系统时间时返回 0。
+/// 当前 Unix 时间戳（秒）。
 pub fn unix_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    since_unix_epoch().as_secs()
 }
 
-/// 当前 Unix 时间戳（毫秒），取不到系统时间时返回 0。
+/// 当前 Unix 时间戳（毫秒）。
 pub fn unix_millis() -> u128 {
+    since_unix_epoch().as_millis()
+}
+
+/// 系统时钟早于 1970 年时签名与时间戳参数全都无效，静默返回 0 只会让请求在服务端
+/// 莫名失败，因此直接视为环境错误。
+fn since_unix_epoch() -> Duration {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
+        .expect("系统时钟早于 Unix 纪元")
 }
 
 /// 发送不带请求体的请求，返回原始响应。
@@ -80,7 +82,7 @@ pub async fn send_form(
 /// 状态码非 2xx 时返回 [`SearchError::Status`]，不会去解析错误页正文。
 pub async fn json<T: DeserializeOwned>(response: Response) -> Result<T, SearchError> {
     ensure_success(&response)?;
-    response.json::<T>().await.map_err(SearchError::Http)
+    Ok(response.json::<T>().await?)
 }
 
 /// 读取响应体文本。
@@ -89,7 +91,7 @@ pub async fn json<T: DeserializeOwned>(response: Response) -> Result<T, SearchEr
 /// 返回带业务错误码的 JSON，这类正文仍会原样交给调用方。
 pub async fn text(response: Response) -> Result<String, SearchError> {
     ensure_success(&response)?;
-    response.text().await.map_err(SearchError::Http)
+    Ok(response.text().await?)
 }
 
 /// 构造请求、附加请求头并发送。
@@ -103,7 +105,7 @@ async fn send_request(
     for (key, value) in headers {
         request = request.header(*key, *value);
     }
-    body(request).send().await.map_err(SearchError::Http)
+    Ok(body(request).send().await?)
 }
 
 /// 状态码非 2xx 时构造 [`SearchError::Status`]。

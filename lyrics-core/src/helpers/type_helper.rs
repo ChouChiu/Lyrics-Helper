@@ -12,7 +12,7 @@ use serde_json::Value;
 use std::sync::LazyLock;
 
 /// TTML 文档的命名空间。
-const TTML_NAMESPACE: &[u8] = b"http://www.w3.org/ns/ttml";
+const TTML_NAMESPACE: &str = "http://www.w3.org/ns/ttml";
 
 // 格式：一个或多个 [分:秒.毫秒] 时间戳，毫秒部分可省略，也支持使用冒号分隔毫秒。
 // 示例：[00:12.345]Hello world
@@ -350,14 +350,14 @@ fn scan_xml(input: &str) -> Result<XmlScan, ()> {
                 let local_name = start.local_name();
                 let local_name = local_name.as_ref();
 
-                if local_name.eq_ignore_ascii_case(b"Lyric_1")
-                    && start_has_attribute(&start, b"LyricContent")?
+                if local_name.eq_ignore_ascii_case("Lyric_1")
+                    && start_has_attribute(&start, "LyricContent")?
                 {
                     scan.has_lyric_content = true;
                 }
 
                 if is_root {
-                    scan.root_is_ttml = local_name.eq_ignore_ascii_case(b"tt")
+                    scan.root_is_ttml = local_name.eq_ignore_ascii_case("tt")
                         && matches!(namespace, ResolveResult::Bound(Namespace(ns)) if ns == TTML_NAMESPACE);
                     is_root = false;
                 }
@@ -371,7 +371,7 @@ fn scan_xml(input: &str) -> Result<XmlScan, ()> {
 }
 
 /// 元素是否带指定局部名的属性（大小写不敏感，忽略命名空间前缀）。
-fn start_has_attribute(start: &BytesStart<'_>, name: &[u8]) -> Result<bool, ()> {
+fn start_has_attribute(start: &BytesStart<'_>, name: &str) -> Result<bool, ()> {
     for attribute in start.attributes() {
         let attribute = attribute.map_err(|_| ())?;
         if attribute

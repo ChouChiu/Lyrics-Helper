@@ -7,8 +7,7 @@
 use std::fmt::Write as _;
 
 use aes::Aes128;
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use md5::{Digest, Md5};
 
 /// eapi 加密密钥，对应 C# `EapiHelper.eapiKey`。
@@ -32,18 +31,30 @@ const AES_BLOCK_SIZE: usize = 16;
 pub fn encrypt_params(url: &str, data_json: &str) -> String {
     let url = strip_eapi_prefix(url);
     let digest = Md5::digest(format!("nobody{url}use{data_json}md5forencrypt").as_bytes());
-    let mut buffer = format!("{url}{SEPARATOR}{data_json}{SEPARATOR}{digest:x}").into_bytes();
+    let digest = hex(&digest, false);
+    let mut buffer = format!("{url}{SEPARATOR}{data_json}{SEPARATOR}{digest}").into_bytes();
     pkcs7_pad(&mut buffer);
 
-    let cipher = Aes128::new(GenericArray::from_slice(EAPI_KEY));
-    let mut params = String::with_capacity(buffer.len() * 2);
+    let cipher = Aes128::new(&(*EAPI_KEY).into());
     for block in buffer.chunks_exact_mut(AES_BLOCK_SIZE) {
-        cipher.encrypt_block(GenericArray::from_mut_slice(block));
-        for byte in block.iter() {
-            let _ = write!(params, "{byte:02X}");
-        }
+        // `pkcs7_pad` 保证了长度是分组长度的整数倍，每块恰好 16 字节。
+        cipher.encrypt_block(block.try_into().expect("AES 分组长度为 16 字节"));
     }
-    params
+    hex(&buffer, true)
+}
+
+/// 十六进制编码。
+fn hex(bytes: &[u8], upper: bool) -> String {
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        // 写入 String 不会失败。
+        let _ = if upper {
+            write!(text, "{byte:02X}")
+        } else {
+            write!(text, "{byte:02x}")
+        };
+    }
+    text
 }
 
 /// 剥离 eapi 接口前缀，对应 C# `EApi` 中的 `Replace`。

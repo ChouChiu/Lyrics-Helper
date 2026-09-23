@@ -1,5 +1,9 @@
 //! QRC XML 封装处理工具，对应上游 C# 的 `Decrypter/Qrc/XmlUtils.cs`。
 //!
+//! 上游把它放在解密器命名空间下，但它处理的是解密之后的 XML 信封，与密码学无关，
+//! 因此这里归到解析器 crate：解密 crate 不再依赖 XML 与正则，离线解析 `QrcFull` 也不必
+//! 启用网络搜索。
+//!
 //! 腾讯音乐返回的 QRC 歌词往往包裹在非标准 XML 中（属性值内含未转义的引号、`<`、`&`），
 //! 本模块负责把这类内容修复为可解析的 XML，并提供按节点名递归查找的能力。
 
@@ -7,8 +11,11 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::escape::{resolve_predefined_entity, unescape};
+use quick_xml::events::attributes::Attribute;
+use quick_xml::events::{BytesRef, BytesStart, Event};
 use regex::Regex;
+use std::borrow::Cow;
 
 /// 属性起始片段 `\s+[\w:.-]+\s*=\s*"`（对应上游正则的第 1 组，无环视）。
 static ATTR_PREFIX_REGEX: LazyLock<Regex> =
@@ -219,14 +226,17 @@ fn parse_document(content: &str) -> Option<XmlNode> {
             }
             Ok(Event::Text(e)) => {
                 if let Some(parent) = stack.last_mut() {
-                    parent
-                        .text
-                        .push_str(e.unescape().unwrap_or_default().as_ref());
+                    parent.text.push_str(&e.xml10_content());
+                }
+            }
+            Ok(Event::GeneralRef(e)) => {
+                if let Some(parent) = stack.last_mut() {
+                    parent.text.push_str(&reference_text(&e));
                 }
             }
             Ok(Event::CData(e)) => {
                 if let Some(parent) = stack.last_mut() {
-                    parent.text.push_str(&String::from_utf8_lossy(&e));
+                    parent.text.push_str(&e.xml10_content());
                 }
             }
             Ok(Event::Eof) => return None,
@@ -237,24 +247,43 @@ fn parse_document(content: &str) -> Option<XmlNode> {
 }
 
 /// 由开始标签事件构造节点。
-fn element_node(event: &quick_xml::events::BytesStart<'_>) -> XmlNode {
-    let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
-    let mut attributes = Vec::new();
-
-    for attribute in event.attributes().flatten() {
-        let key = String::from_utf8_lossy(attribute.key.as_ref()).to_string();
-        let value = attribute
-            .unescape_value()
-            .map(|v| v.to_string())
-            .unwrap_or_default();
-        attributes.push((key, value));
-    }
-
+fn element_node(event: &BytesStart<'_>) -> XmlNode {
     XmlNode {
-        name,
-        attributes,
+        name: event.name().as_ref().to_string(),
+        attributes: event
+            .attributes()
+            .flatten()
+            .map(|attribute| {
+                (
+                    attribute.key.as_ref().to_string(),
+                    attribute_value(&attribute),
+                )
+            })
+            .collect(),
         children: Vec::new(),
         text: String::new(),
+    }
+}
+
+/// 还原属性值里的实体引用，无法识别的实体原样保留。
+///
+/// 只反转义、不做 XML 属性值规范化：quick-xml 的 `normalized_value` 会把换行换成空格，
+/// 而 QQ 音乐把整段多行 QRC 歌词放在 `LyricContent` 属性里。
+pub(crate) fn attribute_value(attribute: &Attribute<'_>) -> String {
+    unescape(&attribute.value).map_or_else(|_| attribute.value.to_string(), Cow::into_owned)
+}
+
+/// 还原文本中的实体引用（`&amp;`、`&#x4E00;` 等），无法识别的原样保留。
+///
+/// quick-xml 0.38 起文本事件不再包含实体，实体引用单独作为 [`Event::GeneralRef`] 给出，
+/// 调用方需要把它与前后的文本事件拼接起来。
+pub(crate) fn reference_text(reference: &BytesRef<'_>) -> String {
+    if let Ok(Some(character)) = reference.resolve_char_ref() {
+        return character.to_string();
+    }
+    match resolve_predefined_entity(reference) {
+        Some(text) => text.to_string(),
+        None => format!("&{};", &**reference),
     }
 }
 
@@ -282,6 +311,29 @@ mod tests {
             res["lyric"].attribute("LyricContent"),
             Some("[0,1000]A & B(0,1000)")
         );
+    }
+
+    /// 属性值只反转义、不做 XML 规范化：QRC 正文是多行，换行不能被换成空格。
+    #[test]
+    fn multi_line_lyric_content_keeps_its_line_breaks() {
+        let xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<QrcInfos><LyricInfo>\
+<Lyric_1 LyricContent=\"[ti:A &amp; B]\n[0,1000]A(0,1000)\r\n[1000,1000]B(1000,1000)\"/>\
+</LyricInfo></QrcInfos>";
+
+        let doc = create(xml).expect("should parse");
+        let mut res = HashMap::new();
+        recursion_find_element(&doc, &MAPPING, &mut res);
+
+        assert_eq!(
+            res["lyric"].attribute("LyricContent"),
+            Some("[ti:A & B]\n[0,1000]A(0,1000)\r\n[1000,1000]B(1000,1000)")
+        );
+    }
+
+    #[test]
+    fn text_keeps_resolved_and_unknown_entities() {
+        let doc = create("<a>x &lt; y &#169; &nbsp;</a>").expect("should parse");
+        assert_eq!(doc.inner_text(), "x < y \u{A9} &nbsp;");
     }
 
     #[test]

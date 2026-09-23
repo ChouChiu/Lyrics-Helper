@@ -27,9 +27,11 @@ pub use lyrics_search::providers;
 #[cfg(feature = "search")]
 pub use lyrics_search::searchers;
 
-pub use lyrics_generators::generate_string;
+pub use lyrics_generators::{generate_string, generator_for};
 pub use lyrics_parsers::parsers::parse_lyrics as parse;
 pub use lyrics_parsers::parsers::parse_lyrics_auto as parse_auto;
+pub use lyrics_parsers::parsers::parser_for;
 
 pub use lyrics_crypto::decrypter::krc::decrypter::decrypt_lyrics as decrypt_krc;
 pub use lyrics_crypto::decrypter::qrc::decrypter::decrypt_lyrics as decrypt_qrc;
+pub use lyrics_crypto::decrypter::{krc::decrypter::KrcDecrypter, qrc::decrypter::QrcDecrypter};

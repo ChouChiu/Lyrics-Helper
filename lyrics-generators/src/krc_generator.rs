@@ -13,13 +13,17 @@ pub fn generate(lyrics_data: &LyricsData) -> String {
 ///
 /// 返回该行是否真的输出了内容。
 fn append_line(result: &mut String, line: &LineInfo) -> bool {
-    let Some((syllables, start_time, _)) = syllable_info(line) else {
+    let Some((syllables, start_time, end_time)) = syllable_info(line) else {
         return false;
     };
 
     if let Some(start) = start_time {
-        let duration = syllables.last().map_or(0, |last| last.end_time - start);
-        let _ = write!(result, "[{},{}]", start, duration);
+        let _ = write!(
+            result,
+            "[{},{}]",
+            start,
+            end_time.map_or(0, |end| end - start)
+        );
     }
 
     let line_start = start_time.unwrap_or(0);

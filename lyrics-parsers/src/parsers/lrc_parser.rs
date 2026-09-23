@@ -1,3 +1,4 @@
+use crate::parsers::lyrics_data;
 use lyrics_core::models::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -260,14 +261,13 @@ pub fn parse(input: &str) -> LyricsData {
     LyricsData {
         track_metadata: Some(result.track_metadata),
         lines: Some(result.lines),
-        file: Some(FileInfo {
-            lyrics_type: LyricsTypes::Lrc,
-            sync_types: SyncTypes::LineSynced,
-            additional_info: Some(AdditionalFileInfo::General {
+        ..lyrics_data(
+            LyricsTypes::Lrc,
+            SyncTypes::LineSynced,
+            Some(AdditionalFileInfo::General {
                 attributes: result.attributes,
             }),
-        }),
-        writers: None,
+        )
     }
 }
 

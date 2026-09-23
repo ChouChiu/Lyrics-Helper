@@ -229,6 +229,54 @@ fn test_generate_qrc() {
 }
 
 #[test]
+fn test_qrc_line_duration_is_kept_through_offset_and_generation() {
+    // 行头 `[开始时间,时长]` 给出的行时长是独立于音节的数据：末个音节唱完（176463）
+    // 这行还要显示到 194662。偏移要同时作用在行时间与音节时间上，生成时行头要写回
+    // 行时长，而不是首尾音节之差。
+    let content =
+        fs::read_to_string("tests/test_data/QrcDemo.txt").expect("Failed to read QRC file");
+    let mut data = parse(&content, LyricsRawTypes::Qrc).expect("Failed to parse QRC");
+
+    let lines = data.lines.as_mut().unwrap();
+    let line = lines
+        .iter()
+        .find(|line| line.start_time() == Some(170_720))
+        .expect("QrcDemo 应含一条从 170720 开始的行");
+
+    assert_eq!(line.end_time(), Some(194_662), "行结束时间应取自行头");
+    assert_eq!(
+        line.syllables().unwrap().last().unwrap().end_time(),
+        176_463,
+        "音节时间不应被行时间改写"
+    );
+
+    helpers::offset_helper::add_offset(lines, 1000);
+    let qrc = generate_string(&data, LyricsTypes::Qrc).expect("QRC generation should succeed");
+    assert!(
+        qrc.contains("[169720,23942]"),
+        "偏移后行头应为 [169720,23942]: {qrc}"
+    );
+}
+
+#[test]
+fn test_krc_line_duration_is_kept_through_offset_and_generation() {
+    // 与 QRC 相同：行头 `[开始时间,时长]` 的行时长独立于音节，偏移要同时作用在行时间
+    // 与音节时间上，生成时行头写回行时长，而不是首尾音节之差。
+    let content = "[ti:Demo]\n[offset:100]\n[1000,2000]<0,300,0>Hel<300,500,0>lo\n";
+    let mut data = parse(content, LyricsRawTypes::Krc).expect("Failed to parse KRC");
+
+    let line = &data.lines.as_ref().unwrap()[0];
+    assert_eq!(
+        (line.start_time(), line.end_time()),
+        (Some(900), Some(2900))
+    );
+
+    helpers::offset_helper::add_offset(data.lines.as_mut().unwrap(), 400);
+    let krc = generate_string(&data, LyricsTypes::Krc).expect("KRC generation should succeed");
+    assert_eq!(krc.trim_end(), "[500,2000]<0,300,0>Hel<300,500,0>lo");
+}
+
+#[test]
 fn test_generate_yrc() {
     let content =
         fs::read_to_string("tests/test_data/YrcDemo.txt").expect("Failed to read YRC file");
@@ -776,4 +824,62 @@ fn test_lrc_last_line_keeps_its_trailing_characters() {
         .map(|line| line.text_from_any())
         .collect();
     assert_eq!(texts, vec!["Hello".to_string(), "World".to_string()]);
+}
+
+#[test]
+fn test_apply_word_timings_from_a_word_timed_document() {
+    use lyrics_helper::helpers::word_timing::apply_word_timings;
+
+    // 同一首歌的两份文档：YrcDemo.txt 是逐词计时文档，LrcDemo.txt 是要显示的行级转录。
+    let words = parse(
+        &fs::read_to_string("tests/test_data/YrcDemo.txt").expect("Failed to read YRC file"),
+        LyricsRawTypes::Yrc,
+    )
+    .expect("YRC parsing should succeed")
+    .lines
+    .unwrap();
+    let mut rows = parse(
+        &fs::read_to_string("tests/test_data/LrcDemo.txt").expect("Failed to read LRC file"),
+        LyricsRawTypes::Lrc,
+    )
+    .expect("LRC parsing should succeed")
+    .lines
+    .unwrap();
+    let texts: Vec<String> = rows.iter().map(LineInfo::text_from_any).collect();
+
+    apply_word_timings(&mut rows, &words);
+
+    // 每行要么没配上词（原样保留），要么音节拼起来精确等于该行原文。
+    for (row, text) in rows.iter().zip(&texts) {
+        match row.syllables() {
+            Some(syllables) => assert_eq!(&LineInfo::text_from_syllables(syllables), text),
+            None => assert_eq!(&row.text_from_any(), text),
+        }
+    }
+
+    // 行时间取转录的、词时间取逐词文档的：这一行的行头写 4850，逐词文档从 5280 开始唱。
+    let dreaming = rows
+        .iter()
+        .find(|row| row.start_time() == Some(4850))
+        .expect("LRC 有 4850 那一行");
+    assert_eq!(
+        dreaming.text_from_any(),
+        "Dreaming about the things that we could be"
+    );
+    assert_eq!(
+        dreaming.syllables().unwrap()[0].start_time(),
+        5280,
+        "词时间来自逐词文档"
+    );
+
+    // 逐词文档把这一行写在 420，转录写在 1670：差超过容差就整行放弃。
+    let lately = rows
+        .iter()
+        .find(|row| row.start_time() == Some(1670))
+        .expect("LRC 有 1670 那一行");
+    assert_eq!(
+        lately.text_from_any(),
+        "Lately, I've been, I've been losing sleep"
+    );
+    assert!(lately.syllables().is_none(), "超过容差的行不带词时间");
 }

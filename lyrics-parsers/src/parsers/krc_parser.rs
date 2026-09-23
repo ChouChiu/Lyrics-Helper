@@ -1,4 +1,4 @@
-use crate::parsers::attributes_helper;
+use crate::parsers::{apply_offset, lyrics_data, parse_with_attributes};
 use base64::Engine;
 use lyrics_core::models::*;
 use serde::Deserialize;
@@ -21,26 +21,18 @@ pub struct KugouTranslationContent {
 
 /// 解析 KRC 格式歌词，自动提取属性、翻译和逐音节信息，返回 [`LyricsData`]。
 pub fn parse(input: &str) -> LyricsData {
-    let mut lyrics_lines = get_splited_krc(input);
-    let mut data = LyricsData {
-        file: Some(FileInfo {
-            lyrics_type: LyricsTypes::Krc,
-            sync_types: SyncTypes::SyllableSynced,
-            additional_info: Some(AdditionalFileInfo::new_krc()),
-        }),
-        track_metadata: Some(TrackMetadata::new()),
-        lines: None,
-        writers: None,
-    };
-
-    let offset = attributes_helper::parse_general_attributes_to_lyrics_data_from_lines(
-        &mut data,
-        &mut lyrics_lines,
+    let mut data = parse_with_attributes(
+        lyrics_data(
+            LyricsTypes::Krc,
+            SyncTypes::SyllableSynced,
+            Some(AdditionalFileInfo::new_krc()),
+        ),
+        get_splited_krc(input),
+        parse_lyrics_from_lines,
     );
-    let mut lyrics = parse_lyrics_from_lines(&lyrics_lines, offset);
-    apply_translations(&mut lyrics, input);
-
-    data.lines = Some(lyrics);
+    if let Some(lines) = data.lines.as_mut() {
+        apply_translations(lines, input);
+    }
     data
 }
 
@@ -79,23 +71,14 @@ fn apply_translations(lyrics: &mut [LineInfo], input: &str) {
 }
 
 /// 从预分割的 KRC 歌词行列表解析歌词，可选地应用时间偏移。
+///
+/// 只有以 `[` 开头、行头与首个音节时间都能读出的行才会保留。
 pub fn parse_lyrics_from_lines(lyrics_lines: &[String], offset: Option<i32>) -> Vec<LineInfo> {
-    let mut lyrics: Vec<LineInfo> = Vec::new();
-
-    for line in lyrics_lines {
-        if line.starts_with('[') {
-            if let Some(l) = parse_lyrics_line(line) {
-                lyrics.push(l);
-            }
-        }
-    }
-
-    if let Some(offset_val) = offset {
-        if offset_val != 0 {
-            lyrics_core::helpers::offset_helper::add_offset(&mut lyrics, offset_val);
-        }
-    }
-
+    let mut lyrics: Vec<LineInfo> = lyrics_lines
+        .iter()
+        .filter_map(|line| parse_lyrics_line(line))
+        .collect();
+    apply_offset(&mut lyrics, offset);
     lyrics
 }
 
@@ -123,39 +106,33 @@ pub fn get_splited_krc_without_info_line(krc: &str) -> Vec<String> {
 }
 
 /// 解析单行 KRC 歌词，提取逐音节时间信息，返回单个 [`LineInfo`]。
+///
+/// 行格式为 `[行开始时间,行时长]<相对开始,时长,0>文本<...>文本`。行头的开始时间或首个
+/// 音节的时间读不出来时返回 `None`；后续音节的时间读不出来时沿用前一个音节的时间，
+/// 与上游一致。
+///
+/// 与 QRC 一样，行头写的行时长会一并写进 [`LineInfo`]：行时间与音节时间相互独立，
+/// 末个音节唱完不等于这行该消失。行时长读不出来时行结束时间回退到末个音节。
 pub fn parse_lyrics_line(line: &str) -> Option<LineInfo> {
-    let bracket_end = line.find(']')?;
-    let after_bracket = &line[bracket_end + 1..];
-    let words: Vec<&str> = after_bracket.split(",0>").collect();
+    let (header, body) = line.strip_prefix('[')?.split_once(']')?;
+    let mut header = header.split(',');
+    let line_start: i32 = header.next()?.parse().ok()?;
+    let line_end = header
+        .next()
+        .and_then(|duration| duration.parse::<i32>().ok())
+        .map(|duration| line_start + duration);
 
-    if words.is_empty() {
-        return None;
-    }
-
-    let line_time_str = &line[1..bracket_end];
-    let line_time: Vec<&str> = line_time_str.split(',').collect();
-    let line_start: i32 = line_time.first()?.parse().ok()?;
+    let mut words = body.split(",0>");
+    let mut first_time = words.next()?.strip_prefix('<')?.split(',');
+    let mut start: i32 = first_time.next()?.parse().ok()?;
+    let mut duration: i32 = first_time.next()?.parse().ok()?;
 
     let mut syllables: Vec<SyllableInfo> = Vec::new();
-
-    // First word
-    let first_word = words[0];
-    let first_time_str = &first_word[1..]; // Skip the '<'
-    let first_time: Vec<&str> = first_time_str.split(',').collect();
-    let mut start: i32 = first_time.first()?.parse().ok()?;
-    let mut duration: i32 = first_time.get(1)?.parse().ok()?;
-
-    for &word in words.iter().skip(1) {
-        let (text, next_start, next_duration) = if word.contains('<') {
-            let last_lt = word.rfind('<').unwrap_or(word.len());
-            let text = &word[..last_lt];
-            let time_str = &word[last_lt + 1..];
-            let time: Vec<&str> = time_str.split(',').collect();
-            let ns: i32 = time.first().and_then(|s| s.parse().ok()).unwrap_or(start);
-            let nd: i32 = time.get(1).and_then(|s| s.parse().ok()).unwrap_or(duration);
-            (text, Some(ns), Some(nd))
-        } else {
-            (word, None, None)
+    for word in words {
+        // 每段是「本音节文本<下一音节的时间」，最后一段没有 `<`。
+        let (text, next_time) = match word.rsplit_once('<') {
+            Some((text, time)) => (text, Some(time)),
+            None => (word, None),
         };
 
         syllables.push(SyllableInfo::new(
@@ -164,13 +141,18 @@ pub fn parse_lyrics_line(line: &str) -> Option<LineInfo> {
             line_start + start + duration,
         ));
 
-        if let (Some(ns), Some(nd)) = (next_start, next_duration) {
-            start = ns;
-            duration = nd;
+        if let Some(time) = next_time {
+            let mut time = time.split(',');
+            start = time.next().and_then(|s| s.parse().ok()).unwrap_or(start);
+            duration = time.next().and_then(|s| s.parse().ok()).unwrap_or(duration);
         }
     }
 
-    Some(LineInfo::new_syllable(to_syllable_items(syllables)))
+    Some(LineInfo::new_syllable_with_time(
+        to_syllable_items(syllables),
+        Some(line_start),
+        line_end,
+    ))
 }
 
 /// 检查 KRC 歌词是否包含翻译内容（通过 base64 编码的 `[language]` 标签）。
@@ -207,4 +189,65 @@ pub fn get_translation_from_krc(krc: &str) -> Option<Vec<String>> {
             .filter_map(|lines| lines.first().cloned())
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_relative_syllable_times() {
+        let line = parse_lyrics_line("[1000,800]<0,300,0>Hel<300,500,0>lo").unwrap();
+        let syllables = line.syllables().unwrap();
+        assert_eq!(
+            syllables
+                .iter()
+                .map(|s| (s.text(), s.start_time(), s.end_time()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Hel".to_string(), 1000, 1300),
+                ("lo".to_string(), 1300, 1800)
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_the_line_duration_written_in_the_header() {
+        // 末个音节 1800 唱完，但行头说这行显示到 3000。
+        let line = parse_lyrics_line("[1000,2000]<0,300,0>Hel<300,500,0>lo").unwrap();
+
+        assert_eq!(line.start_time(), Some(1000));
+        assert_eq!(line.end_time(), Some(3000));
+        assert_eq!(
+            line.syllables().unwrap().last().unwrap().end_time(),
+            1800,
+            "音节时间不应被行时间改写"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_syllables_without_a_line_duration() {
+        let line = parse_lyrics_line("[1000]<0,300,0>Hel<300,500,0>lo").unwrap();
+        assert_eq!(
+            (line.start_time(), line.end_time()),
+            (Some(1000), Some(1800))
+        );
+    }
+
+    /// 畸形行返回 `None`，不能在切片时 panic。
+    #[test]
+    fn rejects_malformed_lines_without_panicking() {
+        for line in [
+            "",
+            "]",
+            "[",
+            "[]",
+            "[0,1]",
+            "[x,1]<0,1,0>a",
+            "[0,1]0,1,0>a",
+            "[0,1]<é",
+        ] {
+            assert!(parse_lyrics_line(line).is_none(), "{line:?}");
+        }
+    }
 }

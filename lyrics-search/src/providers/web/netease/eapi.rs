@@ -6,7 +6,7 @@
 
 use std::sync::LazyLock;
 
-use rand::Rng;
+use rand::RngExt;
 use regex::Regex;
 use serde_json::{Value, json};
 

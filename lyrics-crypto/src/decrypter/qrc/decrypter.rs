@@ -1,5 +1,5 @@
-use flate2::read::ZlibDecoder;
-use std::io::Read;
+use crate::decrypter::{inflate, into_text};
+use lyrics_core::traits::decrypter::{DecryptError, LyricsDecrypter};
 
 const QRC_KEY: &[u8; 24] = b"!@#)(*$%123ZXC!@!@#)(NHL";
 
@@ -60,8 +60,12 @@ const KEY_COMPRESSION: [u32; 48] = [
     30, 36, 46, 54, 29, 39, 50, 44, 32, 47, 43, 48, 38, 55, 33, 52, 45, 41, 49, 35, 28, 31,
 ];
 
-const ENCRYPT: u32 = 1;
-const DECRYPT: u32 = 0;
+/// 子密钥的使用方向：解密时 16 轮子密钥倒序排列。
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Encrypt,
+    Decrypt,
+}
 
 fn bitnum(a: &[u8], b: usize, c: usize) -> u32 {
     let byte_idx = (b / 32) * 4 + 3 - (b % 32) / 8;
@@ -320,7 +324,7 @@ fn des_crypt(input: &[u8], output: &mut [u8], key: &[[u8; 6]]) {
     output.copy_from_slice(&result);
 }
 
-fn key_schedule(key: &[u8], schedule: &mut [[u8; 6]], mode: u32) {
+fn key_schedule(key: &[u8], schedule: &mut [[u8; 6]], mode: Mode) {
     let mut c: u32 = 0;
     let mut d: u32 = 0;
 
@@ -335,7 +339,7 @@ fn key_schedule(key: &[u8], schedule: &mut [[u8; 6]], mode: u32) {
         c = ((c << shift) | (c >> (28 - shift))) & 0xfffffff0;
         d = ((d << shift) | (d >> (28 - shift))) & 0xfffffff0;
 
-        let togen = if mode == DECRYPT { 15 - i } else { i };
+        let togen = if mode == Mode::Decrypt { 15 - i } else { i };
         schedule[togen] = [0u8; 6];
 
         for j in 0..24 {
@@ -349,17 +353,14 @@ fn key_schedule(key: &[u8], schedule: &mut [[u8; 6]], mode: u32) {
 
 type DesSchedule = [[u8; 6]; 16];
 
-fn triple_des_key_setup(key: &[u8], mode: u32) -> [DesSchedule; 3] {
+/// 3DES-EDE 解密的子密钥：按 K3 解密 → K2 加密 → K1 解密的顺序排列。
+///
+/// QRC 只需要解密方向，因此不保留上游的加密分支。
+fn triple_des_decrypt_schedule(key: &[u8]) -> [DesSchedule; 3] {
     let mut schedule = [[[0u8; 6]; 16]; 3];
-    if mode == ENCRYPT {
-        key_schedule(&key[0..], &mut schedule[0], ENCRYPT);
-        key_schedule(&key[8..], &mut schedule[1], DECRYPT);
-        key_schedule(&key[16..], &mut schedule[2], ENCRYPT);
-    } else {
-        key_schedule(&key[16..], &mut schedule[0], DECRYPT);
-        key_schedule(&key[8..], &mut schedule[1], ENCRYPT);
-        key_schedule(&key[0..], &mut schedule[2], DECRYPT);
-    }
+    key_schedule(&key[16..], &mut schedule[0], Mode::Decrypt);
+    key_schedule(&key[8..], &mut schedule[1], Mode::Encrypt);
+    key_schedule(&key[0..], &mut schedule[2], Mode::Decrypt);
     schedule
 }
 
@@ -371,41 +372,42 @@ fn triple_des_crypt(input: &[u8], output: &mut [u8], key: &[DesSchedule; 3]) {
     output.copy_from_slice(&buf);
 }
 
+/// QRC 格式歌词解密器，实现 `LyricsDecrypter` trait。
+///
+/// [`decrypt`](LyricsDecrypter::decrypt) 接收十六进制文本，
+/// [`decrypt_bytes`](LyricsDecrypter::decrypt_bytes) 接收十六进制解码后的原始密文。
+pub struct QrcDecrypter;
+
+impl LyricsDecrypter for QrcDecrypter {
+    fn decrypt(&self, input: &str) -> Result<String, DecryptError> {
+        let hex: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+        let encrypted = hex_to_bytes(&hex).ok_or(DecryptError::InvalidInput)?;
+        into_text(self.decrypt_bytes(&encrypted)?)
+    }
+
+    fn decrypt_bytes(&self, input: &[u8]) -> Result<Vec<u8>, DecryptError> {
+        let schedule = triple_des_decrypt_schedule(QRC_KEY);
+        let mut data = Vec::with_capacity(input.len());
+
+        for block in input.chunks(8) {
+            // 不足 8 字节的尾块补零后解密、再截回原长，与上游 C# 一致。
+            let mut padded = [0u8; 8];
+            padded[..block.len()].copy_from_slice(block);
+            let mut output = [0u8; 8];
+            triple_des_crypt(&padded, &mut output, &schedule);
+            data.extend_from_slice(&output[..block.len()]);
+        }
+
+        inflate(&data)
+    }
+}
+
 /// 解密 QRC 加密歌词字符串，返回解密后的明文歌词。
 ///
-/// 解密流程：去除空白 → 十六进制解码 → Triple DES 解密 → Zlib 解压 → UTF-8 解码。
+/// 解密流程：去除空白 → 十六进制解码 → Triple DES 解密 → zlib 解压 → UTF-8 解码。
+/// 需要区分失败原因时使用 [`QrcDecrypter`]。
 pub fn decrypt_lyrics(encrypted_lyrics: &str) -> Option<String> {
-    let encrypted = encrypted_lyrics.replace(|c: char| c.is_whitespace(), "");
-    let encrypted_bytes = hex_to_bytes(&encrypted)?;
-
-    let schedule = triple_des_key_setup(QRC_KEY, DECRYPT);
-    let mut data = vec![0u8; encrypted_bytes.len()];
-
-    for i in (0..encrypted_bytes.len()).step_by(8) {
-        let end = (i + 8).min(encrypted_bytes.len());
-        let block_len = end - i;
-        if block_len == 8 {
-            triple_des_crypt(&encrypted_bytes[i..end], &mut data[i..end], &schedule);
-        } else {
-            // Pad incomplete block with zeros to match C# behavior
-            let mut padded_input = [0u8; 8];
-            padded_input[..block_len].copy_from_slice(&encrypted_bytes[i..end]);
-            let mut padded_output = [0u8; 8];
-            triple_des_crypt(&padded_input, &mut padded_output, &schedule);
-            data[i..end].copy_from_slice(&padded_output[..block_len]);
-        }
-    }
-
-    let mut decoder = ZlibDecoder::new(&data[..]);
-    let mut decompressed = Vec::new();
-    decoder.read_to_end(&mut decompressed).ok()?;
-
-    // 去掉可能存在的 UTF-8 BOM。
-    if decompressed.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        decompressed.drain(..3);
-    }
-
-    String::from_utf8(decompressed).ok()
+    QrcDecrypter.decrypt(encrypted_lyrics).ok()
 }
 
 fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
@@ -427,11 +429,24 @@ fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
+    /// README 里的示例密文，解密结果是一段带属性头的 QRC 歌词。
+    const SAMPLE: &str = "61EA2D770702AE2B2B52DA9EDDEC07BB35F01431C529E8AE46B70CD635C127867\
+                          E1AB832ABFF18CF7AABF1313EF7EF537021F03A5E957206";
+
     #[test]
-    fn test_qrc_decrypt_known_lyric() {
-        let encrypted = "817AF7CF87FDCF998A6DC70BC1A8239F";
-        let result = decrypt_lyrics(encrypted);
-        // Just test that it doesn't panic
-        let _ = result;
+    fn decrypts_known_ciphertext() {
+        let text = decrypt_lyrics(SAMPLE).expect("示例密文应能解密");
+        assert!(!text.is_empty());
+        assert_eq!(QrcDecrypter.decrypt(SAMPLE).as_deref(), Ok(text.as_str()));
+    }
+
+    #[test]
+    fn reports_why_decryption_failed() {
+        assert_eq!(QrcDecrypter.decrypt("ABC"), Err(DecryptError::InvalidInput));
+        assert_eq!(QrcDecrypter.decrypt("zz"), Err(DecryptError::InvalidInput));
+        assert_eq!(
+            QrcDecrypter.decrypt("00000000000000000000000000000000"),
+            Err(DecryptError::DecompressionFailed)
+        );
     }
 }

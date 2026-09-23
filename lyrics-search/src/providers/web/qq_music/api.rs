@@ -327,12 +327,12 @@ pub async fn get_lyrics(
     };
 
     let lyric = decrypt_qrc_lyric(
-        &data.lyric,
+        data.lyric.as_deref(),
         data.qrc_t.unwrap_or(0),
         data.lrc_t.unwrap_or(0),
     )
     .and_then(|text| extract_lyric_content(&text));
-    let trans = decrypt_qrc_lyric(&data.trans, data.trans_t.unwrap_or(0), 0)
+    let trans = decrypt_qrc_lyric(data.trans.as_deref(), data.trans_t.unwrap_or(0), 0)
         .and_then(|text| extract_lyric_content(&text));
 
     Ok((lyric, trans))
@@ -365,13 +365,9 @@ fn extract_lyric_content(raw: &str) -> Option<String> {
             return Some(text);
         }
 
-        let document = lyrics_crypto::decrypter::qrc::xml_utils::create(&text)?;
+        let document = lyrics_parsers::xml_utils::create(&text)?;
         let mut found = HashMap::new();
-        lyrics_crypto::decrypter::qrc::xml_utils::recursion_find_element(
-            &document,
-            &QQ_XML_MAPPING,
-            &mut found,
-        );
+        lyrics_parsers::xml_utils::recursion_find_element(&document, &QQ_XML_MAPPING, &mut found);
 
         text = found.get("lyric")?.attribute("LyricContent")?.to_string();
     }
@@ -379,13 +375,10 @@ fn extract_lyric_content(raw: &str) -> Option<String> {
     Some(text)
 }
 
-fn decrypt_qrc_lyric(encrypted: &Option<String>, qrc_t: i32, lrc_t: i32) -> Option<String> {
-    let text = encrypted.as_ref()?;
-    if text.is_empty() {
-        return None;
-    }
-    let t = if qrc_t != 0 { qrc_t } else { lrc_t };
-    if t == 0 {
+/// 解密一段 QRC 密文；平台用 `qrc_t`/`lrc_t` 为 0 表示「没有这种歌词」。
+fn decrypt_qrc_lyric(encrypted: Option<&str>, qrc_t: i32, lrc_t: i32) -> Option<String> {
+    let text = encrypted.filter(|text| !text.is_empty())?;
+    if qrc_t == 0 && lrc_t == 0 {
         return None;
     }
     lyrics_crypto::decrypter::qrc::decrypter::decrypt_lyrics(text)

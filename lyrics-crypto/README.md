@@ -8,11 +8,15 @@
 - **KRC**：Base64 密文跳过魔数头后的 XOR 解密 + zlib 解压
 - **网易云音乐 eapi**：`params` 参数加密（MD5 摘要 + AES-128-ECB）
 
+QRC、KRC 均提供实现 `LyricsDecrypter` 的 `QrcDecrypter` / `KrcDecrypter`，失败时通过 `DecryptError` 区分输入无效、解压失败与编码错误；返回 `Option` 的 `decrypt_lyrics` 是它们的简写
+
+QRC 的 XML 信封处理（`xml_utils`）自 0.5.0 起位于 `lyrics_parsers::xml_utils`
+
 ## 依赖
 
 ```toml
 [dependencies]
-lyrics-crypto = "0.3"
+lyrics-crypto = "0.5.0"
 ```
 
 ## 使用

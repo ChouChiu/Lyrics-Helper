@@ -25,9 +25,16 @@ pub enum LineInfo {
         sub_line: Option<Box<LineInfo>>,
     },
     /// 音节歌词行，由多个音节组成，无直接文本。
+    ///
+    /// 行时间与音节时间相互独立：QRC 等格式在行头写整行该显示多久，末个音节唱完
+    /// 不等于这行该消失。`start_time`/`end_time` 为 `None` 时回退到首尾音节。
     Syllable {
         /// 音节列表
         syllables: Vec<SyllableItem>,
+        /// 行开始时间（毫秒），`None` 时取首个音节的开始时间
+        start_time: Option<i32>,
+        /// 行结束时间（毫秒），`None` 时取末尾音节的结束时间
+        end_time: Option<i32>,
         /// 文本对齐方式
         alignment: LyricsAlignment,
         /// 子行（如背景和声）
@@ -54,6 +61,10 @@ pub enum LineInfo {
     FullSyllable {
         /// 音节列表
         syllables: Vec<SyllableItem>,
+        /// 行开始时间（毫秒），`None` 时取首个音节的开始时间
+        start_time: Option<i32>,
+        /// 行结束时间（毫秒），`None` 时取末尾音节的结束时间
+        end_time: Option<i32>,
         /// 文本对齐方式
         alignment: LyricsAlignment,
         /// 子行（如背景和声）
@@ -99,10 +110,29 @@ impl LineInfo {
         }
     }
 
-    /// 创建音节歌词行。
+    /// 创建音节歌词行，行时间回退到首尾音节。
     pub fn new_syllable(syllables: Vec<SyllableItem>) -> Self {
         Self::Syllable {
             syllables,
+            start_time: None,
+            end_time: None,
+            alignment: LyricsAlignment::Unspecified,
+            sub_line: None,
+        }
+    }
+
+    /// 创建带行时间戳的音节歌词行。
+    ///
+    /// 行时间与音节时间相互独立，取 `None` 的字段回退到首尾音节。
+    pub fn new_syllable_with_time(
+        syllables: Vec<SyllableItem>,
+        start_time: Option<i32>,
+        end_time: Option<i32>,
+    ) -> Self {
+        Self::Syllable {
+            syllables,
+            start_time,
+            end_time,
             alignment: LyricsAlignment::Unspecified,
             sub_line: None,
         }
@@ -127,7 +157,7 @@ impl LineInfo {
         }
     }
 
-    /// 创建带翻译和拼音的完整音节歌词行。
+    /// 创建带翻译和拼音的完整音节歌词行，行时间回退到首尾音节。
     pub fn new_full_syllable(
         syllables: Vec<SyllableItem>,
         translations: HashMap<String, String>,
@@ -135,6 +165,8 @@ impl LineInfo {
     ) -> Self {
         Self::FullSyllable {
             syllables,
+            start_time: None,
+            end_time: None,
             alignment: LyricsAlignment::Unspecified,
             sub_line: None,
             translations,
@@ -155,23 +187,37 @@ impl LineInfo {
         super::syllable_info::get_text_from_syllable_items(syllables)
     }
 
-    /// 返回开始时间（毫秒）。音节行取第一个音节的开始时间。
+    /// 返回开始时间（毫秒）。音节行优先取行头写的行开始时间，没有则取首个音节的开始时间。
     pub fn start_time(&self) -> Option<i32> {
         match self {
             Self::Line { start_time, .. } | Self::FullLine { start_time, .. } => *start_time,
-            Self::Syllable { syllables, .. } | Self::FullSyllable { syllables, .. } => {
-                syllables.first().map(|s| s.start_time())
+            Self::Syllable {
+                syllables,
+                start_time,
+                ..
             }
+            | Self::FullSyllable {
+                syllables,
+                start_time,
+                ..
+            } => start_time.or_else(|| syllables.first().map(|s| s.start_time())),
         }
     }
 
-    /// 返回结束时间（毫秒）。音节行取最后一个音节的结束时间。
+    /// 返回结束时间（毫秒）。音节行优先取行头写的行结束时间，没有则取末尾音节的结束时间。
     pub fn end_time(&self) -> Option<i32> {
         match self {
             Self::Line { end_time, .. } | Self::FullLine { end_time, .. } => *end_time,
-            Self::Syllable { syllables, .. } | Self::FullSyllable { syllables, .. } => {
-                syllables.last().map(|s| s.end_time())
+            Self::Syllable {
+                syllables,
+                end_time,
+                ..
             }
+            | Self::FullSyllable {
+                syllables,
+                end_time,
+                ..
+            } => end_time.or_else(|| syllables.last().map(|s| s.end_time())),
         }
     }
 
@@ -180,6 +226,34 @@ impl LineInfo {
         match (self.start_time(), self.end_time()) {
             (Some(s), Some(e)) => Some(e - s),
             _ => None,
+        }
+    }
+
+    /// 返回行自身记录的开始/结束时间的可变引用。
+    ///
+    /// 与 [`LineInfo::start_time`] 不同，音节行这里不回退到首尾音节。
+    pub(crate) fn line_times_mut(&mut self) -> (&mut Option<i32>, &mut Option<i32>) {
+        match self {
+            Self::Line {
+                start_time,
+                end_time,
+                ..
+            }
+            | Self::Syllable {
+                start_time,
+                end_time,
+                ..
+            }
+            | Self::FullLine {
+                start_time,
+                end_time,
+                ..
+            }
+            | Self::FullSyllable {
+                start_time,
+                end_time,
+                ..
+            } => (start_time, end_time),
         }
     }
 
@@ -402,10 +476,14 @@ impl LineInfo {
             },
             Self::Syllable {
                 syllables,
+                start_time,
+                end_time,
                 alignment,
                 sub_line,
             } => Self::FullSyllable {
                 syllables,
+                start_time,
+                end_time,
                 alignment,
                 sub_line,
                 translations,
@@ -424,10 +502,14 @@ impl LineInfo {
         match self {
             Self::Syllable {
                 syllables,
+                start_time,
+                end_time,
                 alignment,
                 sub_line,
             } => Self::FullSyllable {
                 syllables,
+                start_time,
+                end_time,
                 alignment,
                 sub_line,
                 translations,

@@ -1,4 +1,4 @@
-use crate::parsers::lrc_parser;
+use crate::parsers::{lrc_parser, lyrics_data};
 use lyrics_core::models::*;
 use serde::Deserialize;
 use serde_json::Value;
@@ -44,21 +44,18 @@ fn call_str<'a>(call: Option<&'a Value>, path: &[&str]) -> Option<&'a str> {
 }
 
 /// 构造一份只有歌词行的 [`LyricsData`]。
-fn lyrics_data(lines: Vec<LineInfo>, sync_types: SyncTypes, language: Option<&str>) -> LyricsData {
-    let mut metadata = TrackMetadata::new();
-    if let Some(language) = language {
-        metadata.language = Some(vec![language.to_string()]);
-    }
-
+fn musixmatch_data(
+    lines: Vec<LineInfo>,
+    sync_types: SyncTypes,
+    language: Option<&str>,
+) -> LyricsData {
     LyricsData {
-        file: Some(FileInfo {
-            lyrics_type: LyricsTypes::Musixmatch,
-            sync_types,
-            additional_info: None,
-        }),
         lines: Some(lines),
-        track_metadata: Some(metadata),
-        writers: None,
+        track_metadata: Some(TrackMetadata {
+            language: language.map(|language| vec![language.to_string()]),
+            ..TrackMetadata::default()
+        }),
+        ..lyrics_data(LyricsTypes::Musixmatch, sync_types, None)
     }
 }
 
@@ -119,7 +116,7 @@ fn parse_richsync(call: Option<&Value>) -> Option<LyricsData> {
     let language = call_str(call, &["richsync", "richssync_language"])
         .or_else(|| call_str(call, &["richsync", "richsync_language"]));
 
-    Some(lyrics_data(lines, SyncTypes::SyllableSynced, language))
+    Some(musixmatch_data(lines, SyncTypes::SyllableSynced, language))
 }
 
 /// 行同步字幕：正文本身就是 LRC。
@@ -134,7 +131,7 @@ fn parse_subtitles(call: Option<&Value>) -> Option<LyricsData> {
         .get("subtitle")?;
     let body = subtitle.get("subtitle_body")?.as_str()?;
 
-    Some(lyrics_data(
+    Some(musixmatch_data(
         lrc_parser::parse_lyrics(body),
         SyncTypes::LineSynced,
         subtitle.get("subtitle_language").and_then(Value::as_str),
@@ -154,5 +151,5 @@ fn parse_unsynced(call: Option<&Value>) -> Option<LyricsData> {
         .map(|line| LineInfo::new_line_simple(line.to_string()))
         .collect();
 
-    Some(lyrics_data(lines, SyncTypes::Unsynced, None))
+    Some(musixmatch_data(lines, SyncTypes::Unsynced, None))
 }

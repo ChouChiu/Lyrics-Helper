@@ -14,7 +14,7 @@ Lyricify 歌词核心库，提供歌词处理的基础类型、traits 和辅助�
 
 ```toml
 [dependencies]
-lyrics-core = "0.3"
+lyrics-core = "0.5.0"
 ```
 
 ## 使用
@@ -23,7 +23,7 @@ lyrics-core = "0.3"
 
 ```toml
 [dependencies]
-lyrics-helper = "0.3"
+lyrics-helper = "0.5.0"
 ```
 
 ## 许可证

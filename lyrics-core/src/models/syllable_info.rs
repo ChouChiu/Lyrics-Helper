@@ -230,24 +230,6 @@ pub fn flatten_syllable_items(syllables: &[SyllableItem]) -> Vec<SyllableInfo> {
     items
 }
 
-/// 为音节项列表中的每个音节添加时间偏移量。
-pub fn add_offset_to_syllable_items(syllables: &mut [SyllableItem], offset: i32) {
-    for syllable in syllables.iter_mut() {
-        match syllable {
-            SyllableItem::Syllable(s) => {
-                s.start_time -= offset;
-                s.end_time -= offset;
-            }
-            SyllableItem::Full(f) => {
-                for sub in f.sub_items_mut() {
-                    sub.start_time -= offset;
-                    sub.end_time -= offset;
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

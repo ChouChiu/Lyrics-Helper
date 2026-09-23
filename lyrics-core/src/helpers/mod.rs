@@ -1,4 +1,4 @@
-//! 辅助工具模块，提供字符串处理、数学运算、时间偏移、繁简转换和格式识别等功能。
+//! 辅助工具模块，提供字符串处理、数学运算、时间偏移、跨文档逐词计时、繁简转换和格式识别等功能。
 
 pub mod chinese_helper;
 pub mod conventions;
@@ -7,3 +7,4 @@ pub mod offset_helper;
 pub mod optimization;
 pub mod string_helper;
 pub mod type_helper;
+pub mod word_timing;

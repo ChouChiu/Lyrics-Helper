@@ -1,83 +1,70 @@
+use crate::decrypter::{inflate, into_text};
 use base64::Engine;
-use flate2::read::ZlibDecoder;
 use lyrics_core::traits::decrypter::{DecryptError, LyricsDecrypter};
-use std::io::Read;
 
 const KRC_KEY: [u8; 16] = [
     0x40, 0x47, 0x61, 0x77, 0x5e, 0x32, 0x74, 0x47, 0x51, 0x36, 0x31, 0x2d, 0xce, 0xd2, 0x6e, 0x69,
 ];
 
 /// KRC 格式歌词解密器，实现 `LyricsDecrypter` trait。
+///
+/// [`decrypt`](LyricsDecrypter::decrypt) 接收 Base64 文本，
+/// [`decrypt_bytes`](LyricsDecrypter::decrypt_bytes) 接收 `.krc` 文件的原始字节。
 pub struct KrcDecrypter;
 
 /// KRC 文件头的魔数长度（`krc1`）。
 const MAGIC_LEN: usize = 4;
 
-/// KRC 密文的公共解密流程：跳过魔数 → XOR → Zlib 解压 → 去掉正文前可能存在的 UTF-8 BOM。
+/// KRC 密文的公共解密流程：跳过魔数 → XOR → zlib 解压 → 去掉可能存在的 UTF-8 BOM。
 ///
 /// 酷狗以 `charset=utf8` 下发 KRC，正文带 BOM。上游 C# 的写法是
 /// `Encoding.UTF8.GetString(...)[1..]`——先解码成字符串再丢掉第一个**字符**，
-/// 在有 BOM 时正好等于去掉 BOM。这里改为只在真的匹配到 `EF BB BF` 时才去掉：
-/// 按字节丢掉首字节会把 BOM 截成 `BB BF`，整段正文随即不是合法 UTF-8；
-/// 而万一正文没有 BOM，无条件丢弃又会吃掉歌词的第一个字符。
-///
-/// 输入过短、解压失败或解压结果为空时返回 `None`。
-fn decrypt_payload(content: &[u8]) -> Option<Vec<u8>> {
-    if content.len() <= MAGIC_LEN {
-        return None;
-    }
+/// 在有 BOM 时正好等于去掉 BOM；这里改为只在真的匹配到 BOM 时才去掉。
+fn decrypt_payload(content: &[u8]) -> Result<Vec<u8>, DecryptError> {
+    let body = content
+        .get(MAGIC_LEN..)
+        .filter(|body| !body.is_empty())
+        .ok_or(DecryptError::InvalidInput)?;
 
-    let decrypted: Vec<u8> = content[MAGIC_LEN..]
+    let decrypted: Vec<u8> = body
         .iter()
         .zip(KRC_KEY.iter().cycle())
         .map(|(byte, key)| byte ^ key)
         .collect();
 
-    let mut decompressed = Vec::new();
-    ZlibDecoder::new(&decrypted[..])
-        .read_to_end(&mut decompressed)
-        .ok()?;
-
+    let decompressed = inflate(&decrypted)?;
     if decompressed.is_empty() {
-        return None;
+        return Err(DecryptError::DecompressionFailed);
     }
-
-    if decompressed.starts_with(b"\xEF\xBB\xBF") {
-        decompressed.drain(..3);
-    }
-
-    Some(decompressed)
+    Ok(decompressed)
 }
 
 impl LyricsDecrypter for KrcDecrypter {
     fn decrypt(&self, input: &str) -> Result<String, DecryptError> {
-        decrypt_lyrics(input).ok_or(DecryptError::DecryptionFailed)
+        let encrypted = base64::engine::general_purpose::STANDARD
+            .decode(input)
+            .map_err(|_| DecryptError::InvalidInput)?;
+        into_text(decrypt_payload(&encrypted)?)
     }
 
     fn decrypt_bytes(&self, input: &[u8]) -> Result<Vec<u8>, DecryptError> {
-        if input.len() <= MAGIC_LEN {
-            return Err(DecryptError::InvalidInput);
-        }
-        decrypt_payload(input).ok_or(DecryptError::DecompressionFailed)
+        decrypt_payload(input)
     }
 }
 
 /// 解密 KRC 加密歌词字符串（Base64 编码），返回解密后的明文歌词。
 ///
-/// 解密流程：Base64 解码 → 跳过 4 字节魔数头 → XOR 解密 → Zlib 解压 → 去除可选的 BOM → UTF-8 解码。
+/// 解密流程：Base64 解码 → 跳过 4 字节魔数头 → XOR 解密 → zlib 解压 → 去除可选的 BOM → UTF-8 解码。
+/// 需要区分失败原因时使用 [`KrcDecrypter`]。
 pub fn decrypt_lyrics(encrypted_lyrics: &str) -> Option<String> {
-    let encrypted = base64::engine::general_purpose::STANDARD
-        .decode(encrypted_lyrics)
-        .ok()?;
-
-    decrypt_lyrics_from_file(&encrypted)
+    KrcDecrypter.decrypt(encrypted_lyrics).ok()
 }
 
 /// 从 KRC 文件的原始字节内容解密歌词，返回解密后的明文歌词。
 ///
 /// 与 [`decrypt_lyrics`] 不同，此函数直接接收文件字节（非 Base64 编码）。
 pub fn decrypt_lyrics_from_file(file_content: &[u8]) -> Option<String> {
-    String::from_utf8(decrypt_payload(file_content)?).ok()
+    decrypt_payload(file_content).and_then(into_text).ok()
 }
 
 #[cfg(test)]
@@ -160,6 +147,9 @@ mod tests {
     #[test]
     fn rejects_truncated_input() {
         assert_eq!(decrypt_lyrics_from_file(b"krc1"), None);
-        assert!(KrcDecrypter.decrypt_bytes(b"krc1").is_err());
+        assert_eq!(
+            KrcDecrypter.decrypt_bytes(b"krc1"),
+            Err(DecryptError::InvalidInput)
+        );
     }
 }

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 /// 将毫秒时间值格式化为 `mm:ss.SSS` 格式的时间戳字符串。
 ///
 /// 负值会被当作 0 处理。
@@ -29,26 +31,19 @@ pub fn remove_front_back_brackets(s: &str) -> String {
 ///
 /// `is_case_sensitive` 为 `false` 时忽略大小写。返回值范围 0.0~100.0。
 pub fn compute_text_same(text_x: &str, text_y: &str, is_case_sensitive: bool) -> f64 {
-    let (text_x, text_y) = if is_case_sensitive {
-        (text_x.to_string(), text_y.to_string())
+    let (text_x, text_y): (Cow<str>, Cow<str>) = if is_case_sensitive {
+        (text_x.into(), text_y.into())
     } else {
-        (text_x.to_lowercase(), text_y.to_lowercase())
+        (text_x.to_lowercase().into(), text_y.to_lowercase().into())
     };
 
+    // 两段都为空时也在这里返回，下面的除数因此不会为 0。
     if text_x == text_y {
         return 100.0;
     }
 
-    let len_x = text_x.chars().count();
-    let len_y = text_y.chars().count();
-
-    if len_x == 0 || len_y == 0 {
-        return 0.0;
-    }
-
-    let lcs_len = lcs_length(&text_x, &text_y);
-    let max_len = len_x.max(len_y) as f64;
-    (lcs_len as f64 / max_len) * 100.0
+    let max_len = text_x.chars().count().max(text_y.chars().count()) as f64;
+    (lcs_length(&text_x, &text_y) as f64 / max_len) * 100.0
 }
 
 /// 计算两个字符串的最长公共子序列（LCS）长度。
@@ -57,10 +52,6 @@ pub fn lcs_length(x: &str, y: &str) -> usize {
     let y_chars: Vec<char> = y.chars().collect();
     let m = x_chars.len();
     let n = y_chars.len();
-
-    if m == 0 || n == 0 {
-        return 0;
-    }
 
     let mut prev = vec![0usize; n + 1];
     let mut curr = vec![0usize; n + 1];
