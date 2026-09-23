@@ -235,7 +235,7 @@ fn cmd_decrypt_krc(file_path: &str) {
 }
 
 fn cmd_parsers_demo() {
-    let test_data_dir = "lyrics-helper/tests/test_data";
+    let test_data_dir = "crates/lyrics-helper/tests/test_data";
 
     let demos = vec![
         ("LrcDemo.txt", "lrc"),
@@ -264,7 +264,7 @@ fn cmd_parsers_demo() {
 }
 
 fn cmd_generators_demo() {
-    let path = "lyrics-helper/tests/test_data/LyricifySyllableDemo.txt";
+    let path = "crates/lyrics-helper/tests/test_data/LyricifySyllableDemo.txt";
     if !std::path::Path::new(path).exists() {
         eprintln!("Demo file not found: {}", path);
         return;

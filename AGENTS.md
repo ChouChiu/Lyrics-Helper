@@ -7,7 +7,7 @@ Cargo workspace for parsing, generating, decrypting and searching song lyrics; a
 1. **Never guess an interface** Read the source, the rustdoc or the upstream C# before calling it; for a platform API read its `providers/web/<platform>/api.rs` and `response.rs`, not what the endpoint probably returns
 2. **Clarify an ambiguous requirement first** Ask, get the answer, then write code
 3. **Never invent the workflow** Behaviour of a format or optimizer is checked against upstream Lyricify-Lyrics-Helper; where upstream is silent or the behaviour is new, confirm with the maintainer instead of reconstructing it
-4. **Reuse before you add** Look in `lyrics-core/src/helpers/` (string, math, offset, chinese, type detection, optimization, word timing, conventions), `lyrics-parsers/src/xml_utils.rs` and `providers/web/base_api.rs`, then in the crate you are changing
+4. **Reuse before you add** Look in `crates/lyrics-core/src/helpers/` (string, math, offset, chinese, type detection, optimization, word timing, conventions), `crates/lyrics-parsers/src/xml_utils.rs` and `providers/web/base_api.rs`, then in the crate you are changing
 5. **Never break the architecture for convenience** The layering is enforced by the Cargo manifests: a crate only sees the crates it depends on; do not add a dependency edge to reach a helper, move the helper down into `lyrics-core` instead
 6. **Say what you do not know** Name the gap (unknown upstream behaviour, untested platform response) instead of writing over it
 7. **Map the blast radius before changing logic** Grep callers across all six crates; everything re-exported by `lyrics-helper` is public API; run `cargo test` for the whole workspace and build with `--no-default-features` when touching feature gates
@@ -24,20 +24,21 @@ Cargo workspace for parsing, generating, decrypting and searching song lyrics; a
 ## Workspace
 
 ```
-Cargo.toml            workspace root, version 0.5.0, edition 2024, rust-version 1.85
-lyrics-core/          models (LyricsData, LineInfo, SyllableItem / FullSyllableInfo, TrackMetadata, enums)
-                      traits (LyricsParser, LyricsGenerator, LyricsDecrypter)
-                      helpers (chinese, string, math, offset, type detection, optimization, word timing, conventions)
-lyrics-parsers/       one parser per format: LRC, QRC, KRC, YRC, TTML, Spotify, Musixmatch, Lyricify Syllable / Lines
-                      + xml_utils.rs (QRC XML envelope sanitising and lookup)
-lyrics-generators/    one generator per format: LRC, QRC, KRC, YRC, Lyricify Syllable / Lines
-lyrics-crypto/        QRC and KRC decryption (Triple DES / XOR + zlib) + Netease eapi `params` encryption (MD5 + AES-128-ECB)
-lyrics-search/        search by platform: QQ, Netease, Kugou, Soda, Apple, Musixmatch, LRCLIB, Spotify, AMLL TTML DB
-                      error.rs = SearchError; providers/ = per-platform HTTP clients; searchers/ = Searcher trait + impls
-lyrics-helper/        facade: re-exports everything, holds integration tests and examples
-  tests/parser_tests.rs   integration tests for parsers, generators and decrypters
-  tests/test_data/        12 fixtures (LRC, QRC, KRC, YRC, Spotify, Musixmatch, Lyricify, Apple)
-  examples/               demo.rs, search_test.rs, search_lyrics_test.rs (the last two need network)
+Cargo.toml              workspace root, version 0.5.0, edition 2024, rust-version 1.85
+crates/
+  lyrics-core/          models (LyricsData, LineInfo, SyllableItem / FullSyllableInfo, TrackMetadata, enums)
+                        traits (LyricsParser, LyricsGenerator, LyricsDecrypter)
+                        helpers (chinese, string, math, offset, type detection, optimization, word timing, conventions)
+  lyrics-parsers/       one parser per format: LRC, QRC, KRC, YRC, TTML, Spotify, Musixmatch, Lyricify Syllable / Lines
+                        + xml_utils.rs (QRC XML envelope sanitising and lookup)
+  lyrics-generators/    one generator per format: LRC, QRC, KRC, YRC, Lyricify Syllable / Lines
+  lyrics-crypto/        QRC and KRC decryption (Triple DES / XOR + zlib) + Netease eapi `params` encryption (MD5 + AES-128-ECB)
+  lyrics-search/        search by platform: QQ, Netease, Kugou, Soda, Apple, Musixmatch, LRCLIB, Spotify, AMLL TTML DB
+                        error.rs = SearchError; providers/ = per-platform HTTP clients; searchers/ = Searcher trait + impls
+  lyrics-helper/        facade: re-exports everything, holds integration tests and examples
+    tests/parser_tests.rs   integration tests for parsers, generators and decrypters
+    tests/test_data/        12 fixtures (LRC, QRC, KRC, YRC, Spotify, Musixmatch, Lyricify, Apple)
+    examples/               demo.rs, search_test.rs, search_lyrics_test.rs (the last two need network)
 ```
 
 Dependency graph: `lyrics-core` ← `lyrics-parsers`, `lyrics-generators`, `lyrics-crypto` ← `lyrics-search` ← `lyrics-helper`; `lyrics-search` depends on core, crypto and parsers (for `xml_utils`)
@@ -56,18 +57,18 @@ cargo clippy
 cargo fmt
 cargo doc-local                     # cargo doc --no-deps --open, alias in .cargo/config.toml
 cargo run --example demo -- parsers-demo
-cargo run --example demo -- parse lyrics-helper/tests/test_data/LrcDemo.txt lrc
-cargo run --example demo -- generate lyrics-helper/tests/test_data/QrcDemo.txt qrc lrc
+cargo run --example demo -- parse crates/lyrics-helper/tests/test_data/LrcDemo.txt lrc
+cargo run --example demo -- generate crates/lyrics-helper/tests/test_data/QrcDemo.txt qrc lrc
 ```
 
 No CI, no `rustfmt.toml`, no `clippy.toml`, no `rust-toolchain.toml`; standard defaults apply
 
 ## Architecture
 
-- **Facade**: `lyrics-helper/src/lib.rs` re-exports every crate; top level has `parse`, `parse_auto`, `parser_for`, `generate_string`, `generator_for`, `decrypt_qrc`, `decrypt_krc`, `QrcDecrypter`, `KrcDecrypter` and `SearchError` (only with `search`)
+- **Facade**: `crates/lyrics-helper/src/lib.rs` re-exports every crate; top level has `parse`, `parse_auto`, `parser_for`, `generate_string`, `generator_for`, `decrypt_qrc`, `decrypt_krc`, `QrcDecrypter`, `KrcDecrypter` and `SearchError` (only with `search`)
 - **Dispatch**: each format is a zero-sized type implementing the core trait (`LrcParser` in `lyrics_parsers::parsers`, `LrcGenerator` in `lyrics_generators`), looked up by `parser_for(raw_type)` / `generator_for(type)`; `parse_lyrics`, `parse_lyrics_auto` and `generate_string` are thin wrappers; a new format = its module, one line in the `define_*!` macro and one match arm
-- **Line-format parser pipeline** (`lyrics-parsers/src/parsers/mod.rs`): `lyrics_data(type, sync, info)` builds the `LyricsData` shell, `parse_with_attributes(data, lines, parse_lines)` strips leading `[key:value]` lines and passes `offset` to the format's `parse_lyrics`, which applies it with `apply_offset`; QRC, KRC and Lyricify Syllable / Lines share it
-- **Offsets**: all time shifting lives in `lyrics-core/src/helpers/offset_helper.rs`; `add_offset` moves line times, syllable times and sub-lines together
+- **Line-format parser pipeline** (`crates/lyrics-parsers/src/parsers/mod.rs`): `lyrics_data(type, sync, info)` builds the `LyricsData` shell, `parse_with_attributes(data, lines, parse_lines)` strips leading `[key:value]` lines and passes `offset` to the format's `parse_lyrics`, which applies it with `apply_offset`; QRC, KRC and Lyricify Syllable / Lines share it
+- **Offsets**: all time shifting lives in `crates/lyrics-core/src/helpers/offset_helper.rs`; `add_offset` moves line times, syllable times and sub-lines together
 - **Type detection** (`type_helper.rs`, port of upstream `LyricsTypeDetector`): `get_lyrics_types` recognises LRC / QRC / KRC / YRC / Lyricify Syllable / Lyricify Lines by line regex, plus the envelopes `AppleJson`, `Spotify`, `Musixmatch`, `YrcFull` (JSON) and `QrcFull` (QRC XML)
 - **Raw envelopes are not parsed**: like upstream, `parse_lyrics` returns `None` for `QrcFull` / `YrcFull` / `AppleJson`; callers unwrap them first (the QQ provider extracts `Lyric_1@LyricContent` through `xml_utils`)
 - **Syllable model**: `LineInfo::Syllable` / `FullSyllable` hold `Vec<SyllableItem>` (C# `ISyllableInfo`): `SyllableItem::Syllable` or `SyllableItem::Full` for merged words; generators use `parts()` / `flatten_syllable_items()`; `FullSyllableInfo` derives text and times from `sub_items` on every call, no cache, the model is `Sync`
@@ -88,8 +89,8 @@ No CI, no `rustfmt.toml`, no `clippy.toml`, no `rust-toolchain.toml`; standard d
 - **quick-xml 0.42**: names are `&str`; text events never contain entities, `&amp;` / `&#169;` arrive as separate `Event::GeneralRef`, so accumulate text across `Text` + `GeneralRef` (`xml_utils::reference_text`, TTML `build_tree`); never read attributes with `normalized_value` / `unescape_value`, they turn `\n` into spaces and collapse the multi-line QRC `LyricContent`, use `xml_utils::attribute_value`
 - **reqwest 0.13**: features `json`, `form` (for `send_form`) and `rustls` (aws-lc-rs, needs a C toolchain and cmake)
 - **Versions**: always full `x.y.z`, in the workspace `version`, every inter-crate requirement (`version = "0.5.0"`), READMEs and prose
-- **Test data paths**: tests use `tests/test_data/*.txt`, relative to `lyrics-helper/` because Cargo runs tests from the crate root
+- **Test data paths**: tests use `tests/test_data/*.txt`, relative to `crates/lyrics-helper/` because Cargo runs tests from the crate root
 - **Naming**: packages use hyphens (`lyrics-helper`), crate paths use underscores (`lyrics_helper`)
-- **Examples**: declared in `lyrics-helper/Cargo.toml` with `path = "examples/..."`
+- **Examples**: declared in `crates/lyrics-helper/Cargo.toml` with `path = "examples/..."`
 - **`docs/compose/`**: gitignored planning notes, not a source of truth
 - **Dev dependencies**: `lyrics-helper` has `tokio` for async tests; `pretty_assertions` sits in `[workspace.dependencies]` but no crate uses it

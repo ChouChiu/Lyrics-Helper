@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "lyrics-core",
-    "lyrics-parsers",
-    "lyrics-generators",
-    "lyrics-crypto",
-    "lyrics-search",
-    "lyrics-helper",
+    "crates/lyrics-core",
+    "crates/lyrics-parsers",
+    "crates/lyrics-generators",
+    "crates/lyrics-crypto",
+    "crates/lyrics-search",
+    "crates/lyrics-helper",
 ]
 resolver = "2"
 

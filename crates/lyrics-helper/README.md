@@ -53,8 +53,8 @@ fn main() {
 
 ```bash
 cargo run --example demo -- parsers-demo
-cargo run --example demo -- parse lyrics-helper/tests/test_data/LrcDemo.txt lrc
-cargo run --example demo -- generate lyrics-helper/tests/test_data/QrcDemo.txt qrc lrc
+cargo run --example demo -- parse crates/lyrics-helper/tests/test_data/LrcDemo.txt lrc
+cargo run --example demo -- generate crates/lyrics-helper/tests/test_data/QrcDemo.txt qrc lrc
 ```
 
 ## 从 0.1.0 升级到 0.2.0
@@ -238,27 +238,28 @@ lyrics-helper = { version = "0.5.0", default-features = false }
 项目采用 Cargo workspace，由 6 个 crate 组成：
 
 ```text
-Lyricify-Lyrics-Helper/          # workspace 根目录
-├── Cargo.toml                   # workspace 定义
-├── lyrics-core/                 # 核心模型与 traits
-│   └── src/
-│       ├── models/              # LyricsData, LineInfo, SyllableItem, TrackMetadata, 枚举
-│       ├── traits/              # LyricsParser, LyricsGenerator, LyricsDecrypter
-│       └── helpers/             # chinese, string, math, offset, type detection, optimization
-├── lyrics-parsers/              # 每种格式一个解析器
-├── lyrics-generators/           # 每种格式一个生成器
-├── lyrics-crypto/               # QRC 和 KRC 解密（AES/DES/ECB/CBC）
-├── lyrics-search/               # 各平台歌曲搜索（search feature）
-├── lyrics-helper/               # 门面 crate，re-export 所有子 crate
-│   ├── tests/
-│   │   ├── parser_tests.rs      # 集成测试
-│   │   └── test_data/           # 各格式示例歌词文件
-│   ├── examples/
-│   │   ├── demo.rs              # 解析/生成/解密演示
-│   │   ├── search_test.rs       # 搜索 API 演示
-│   │   └── search_lyrics_test.rs # 搜索+获取歌词演示
-│   └── src/lib.rs               # 顶层 API：parse, parse_auto, generate_string
-└── AGENTS.md
+Lyrics-Helper/                       # workspace 根目录
+├── Cargo.toml                       # workspace 定义
+├── AGENTS.md
+└── crates/
+    ├── lyrics-core/                 # 核心模型与 traits
+    │   └── src/
+    │       ├── models/              # LyricsData, LineInfo, SyllableItem, TrackMetadata, 枚举
+    │       ├── traits/              # LyricsParser, LyricsGenerator, LyricsDecrypter
+    │       └── helpers/             # chinese, string, math, offset, type detection, optimization
+    ├── lyrics-parsers/              # 每种格式一个解析器
+    ├── lyrics-generators/           # 每种格式一个生成器
+    ├── lyrics-crypto/               # QRC 和 KRC 解密（AES/DES/ECB/CBC）
+    ├── lyrics-search/               # 各平台歌曲搜索（search feature）
+    └── lyrics-helper/               # 门面 crate，re-export 所有子 crate
+        ├── tests/
+        │   ├── parser_tests.rs      # 集成测试
+        │   └── test_data/           # 各格式示例歌词文件
+        ├── examples/
+        │   ├── demo.rs              # 解析/生成/解密演示
+        │   ├── search_test.rs       # 搜索 API 演示
+        │   └── search_lyrics_test.rs # 搜索+获取歌词演示
+        └── src/lib.rs               # 顶层 API：parse, parse_auto, generate_string
 ```
 
 **依赖关系**：`lyrics-core` ← `lyrics-parsers` / `lyrics-generators` / `lyrics-crypto` ← `lyrics-search` ← `lyrics-helper`
