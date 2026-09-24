@@ -306,7 +306,8 @@ fn take_word(
     while word_characters > 0 {
         let character = remaining.next()?;
         if character.is_alphanumeric() {
-            if !character.eq_ignore_ascii_case(&expected.next()?) {
+            // 句首的 `É`、`Я` 与逐词文档里的小写也是同一个字母，不能只比 ASCII。
+            if !character.to_lowercase().eq(expected.next()?.to_lowercase()) {
                 return None;
             }
             word_characters -= 1;
@@ -405,6 +406,20 @@ mod tests {
         assert_eq!(
             LineInfo::text_from_syllables(lines[0].syllables().unwrap()),
             "Ugh! You're a monster"
+        );
+    }
+
+    /// 非 ASCII 字母同样忽略大小写。
+    #[test]
+    fn ignores_case_beyond_ascii() {
+        let mut lines = vec![row(0, 1_000, "Élan vital")];
+        let word_lines = vec![word_row(0, &[(0, 500, "élan "), (500, 1_000, "vital")])];
+
+        apply_word_timings(&mut lines, &word_lines);
+
+        assert_eq!(
+            words_of(&lines[0]),
+            vec![(0, "Élan ".to_string()), (500, "vital".to_string())]
         );
     }
 

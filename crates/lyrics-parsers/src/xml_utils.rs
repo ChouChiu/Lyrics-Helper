@@ -11,11 +11,10 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use quick_xml::Reader;
-use quick_xml::escape::{resolve_predefined_entity, unescape};
+use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesRef, BytesStart, Event};
 use regex::Regex;
-use std::borrow::Cow;
 
 /// 属性起始片段 `\s+[\w:.-]+\s*=\s*"`（对应上游正则的第 1 组，无环视）。
 static ATTR_PREFIX_REGEX: LazyLock<Regex> =
@@ -270,7 +269,24 @@ fn element_node(event: &BytesStart<'_>) -> XmlNode {
 /// 只反转义、不做 XML 属性值规范化：quick-xml 的 `normalized_value` 会把换行换成空格，
 /// 而 QQ 音乐把整段多行 QRC 歌词放在 `LyricContent` 属性里。
 pub(crate) fn attribute_value(attribute: &Attribute<'_>) -> String {
-    unescape(&attribute.value).map_or_else(|_| attribute.value.to_string(), Cow::into_owned)
+    // quick-xml 的 `unescape` 遇到一个不认识的实体就整体报错，这里逐个还原，
+    // 一个 `&nbsp;` 不会连累同一属性里的 `&amp;`。
+    let mut value = String::with_capacity(attribute.value.len());
+    let mut rest: &str = &attribute.value;
+    while let Some(start) = rest.find('&') {
+        value.push_str(&rest[..start]);
+        rest = &rest[start..];
+        match rest[1..].find(';') {
+            Some(end) => {
+                value.push_str(&reference_text(&BytesRef::new(&rest[1..=end])));
+                rest = &rest[end + 2..];
+            }
+            // 没有结尾分号的 `&` 不是实体引用，原样保留。
+            None => break,
+        }
+    }
+    value.push_str(rest);
+    value
 }
 
 /// 还原文本中的实体引用（`&amp;`、`&#x4E00;` 等），无法识别的原样保留。
@@ -334,6 +350,13 @@ mod tests {
     fn text_keeps_resolved_and_unknown_entities() {
         let doc = create("<a>x &lt; y &#169; &nbsp;</a>").expect("should parse");
         assert_eq!(doc.inner_text(), "x < y \u{A9} &nbsp;");
+    }
+
+    /// 一个不认识的实体只保留它自己，同一属性里其他实体照样还原。
+    #[test]
+    fn attribute_keeps_only_the_unknown_entity() {
+        let doc = create(r#"<a b="A &amp; B&nbsp;&#169;"/>"#).expect("should parse");
+        assert_eq!(doc.attribute("b"), Some("A & B&nbsp;\u{A9}"));
     }
 
     #[test]

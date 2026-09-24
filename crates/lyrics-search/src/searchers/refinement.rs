@@ -49,6 +49,20 @@ pub fn build_refinement_queries(track: &TrackMetadata) -> Vec<String> {
     ]
 }
 
+/// 渐进式搜索依次发出的查询，从精确到宽泛。
+///
+/// 与前面某条相同的查询跳过而不是就此停下：没有专辑时完整查询与「曲名 + 歌手」相同，
+/// 但更宽的「只用曲名」仍要试。
+fn search_queries(track: &TrackMetadata) -> Vec<String> {
+    let mut queries = vec![build_search_string(track)];
+    for query in build_refinement_queries(track) {
+        if !queries.contains(&query) {
+            queries.push(query);
+        }
+    }
+    queries
+}
+
 /// 使用渐进式搜索策略搜索歌词，先尝试精确匹配，失败后逐步放宽搜索条件。
 ///
 /// 返回按匹配度排序的搜索结果列表。任何一层拿到结果即返回 `Ok(结果)`；
@@ -70,17 +84,8 @@ pub async fn search_with_refinement(
         Err(error) => last_error = Some(error),
     }
 
-    // 从精确到宽泛依次尝试；放宽后与上一条相同就不必再搜。
-    let mut queries = vec![build_search_string(track)];
-    for query in build_refinement_queries(track) {
-        if queries.last() == Some(&query) {
-            break;
-        }
-        queries.push(query);
-    }
-
     let mut all_results: Vec<SearchResult> = Vec::new();
-    for query in &queries {
+    for query in &search_queries(track) {
         match searcher.search_for_results_str(query).await {
             Ok(results) => all_results.extend(results),
             Err(error) => last_error = Some(error),
@@ -161,5 +166,40 @@ pub async fn search_for_best_result_with_match(
     match first_error {
         Some(error) => Err(error),
         None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(title: &str, artist: &str, album: Option<&str>) -> TrackMetadata {
+        TrackMetadata {
+            title: Some(title.to_string()),
+            artist: Some(artist.to_string()),
+            album: album.map(str::to_string),
+            ..TrackMetadata::new()
+        }
+    }
+
+    /// 没有专辑时完整查询与「曲名 + 歌手」相同，只用曲名的那一层仍要搜。
+    #[test]
+    fn falls_back_to_the_title_without_an_album() {
+        assert_eq!(
+            search_queries(&track("晴天", "周杰伦", None)),
+            vec!["晴天 周杰伦".to_string(), "晴天".to_string()]
+        );
+    }
+
+    #[test]
+    fn goes_from_exact_to_broad() {
+        assert_eq!(
+            search_queries(&track("Idol (feat. X)", "YOASOBI", Some("Idol"))),
+            vec![
+                "Idol (feat. X) YOASOBI Idol".to_string(),
+                "Idol YOASOBI".to_string(),
+                "Idol".to_string(),
+            ]
+        );
     }
 }
