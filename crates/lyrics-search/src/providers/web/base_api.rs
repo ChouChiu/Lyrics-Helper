@@ -25,9 +25,16 @@ pub const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/5
 /// 网易云音乐默认 Cookie，对应 C# `BaseApi.Cookie`。
 pub const COOKIE: &str = "os=pc;osver=Microsoft-Windows-10-Professional-build-16299.125-64bit;appver=2.0.3.131777;channel=netease;__remember_me=true";
 
+/// 单次请求的总时长上限。
+///
+/// reqwest 默认不设上限，卡住的连接会一直挂着；AMLL TTML DB 下载索引时还持有锁，
+/// 一条挂住的请求会让之后的搜索全部跟着等。一分钟够国内直连 GitHub 下完 1.6 MB 的索引。
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
         .user_agent(USER_AGENT)
+        .timeout(REQUEST_TIMEOUT)
         .build()
         .expect("Failed to create HTTP client")
 });
