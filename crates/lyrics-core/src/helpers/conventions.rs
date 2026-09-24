@@ -142,12 +142,14 @@ fn speaker_label(text: &str, artists: &[String]) -> Option<(LyricsAlignment, usi
         return Some((LyricsAlignment::Left, content_start));
     }
 
-    let leading = label.split(LABEL_SEPARATORS).find_map(|name| {
+    let position = |name: &str| {
         let name = normalize_artist(name);
         artists
             .iter()
             .position(|artist| !name.is_empty() && name == normalize_artist(artist))
-    })?;
+    };
+    // 名字本身带分隔符的歌手（`Tyler, The Creator`）先整段比，切开就点不到他了。
+    let leading = position(label).or_else(|| label.split(LABEL_SEPARATORS).find_map(position))?;
 
     let alignment = if leading == 0 {
         LyricsAlignment::Left
@@ -415,14 +417,14 @@ fn echo_rows(lines: &[LineInfo], index: usize) -> usize {
     }
     let answers = phrase[0].start_time().is_some_and(|start| {
         start >= parent.start_time().unwrap_or_default()
-            && start <= latest_time_ms(parent).saturating_add(ECHO_GAP_MS)
+            && start <= sung_until_ms(parent).saturating_add(ECHO_GAP_MS)
     });
     // 比一行长的短语是连着唱下来的，所以歌里别处没配上的括号够不到它这里来收尾。
     let back_to_back = phrase.windows(2).all(|rows| {
         let (Some(start), Some(next)) = (rows[1].start_time(), rows[0].start_time()) else {
             return false;
         };
-        start <= latest_time_ms(&rows[0]).saturating_add(ECHO_GAP_MS) && next <= start
+        start <= sung_until_ms(&rows[0]).saturating_add(ECHO_GAP_MS) && next <= start
     });
     if answers && back_to_back { rows } else { 0 }
 }
@@ -537,7 +539,20 @@ pub fn unwrap_brackets(text: &str) -> String {
     let Some(close) = matching_bracket(open) else {
         return trimmed.to_string();
     };
-    if !trimmed.ends_with(close) {
+    // 开头那个括号得在结尾合上：`(来吧)(尽管)` 是两段括号，不是一段。
+    let mut depth = 0_usize;
+    let closed_at = trimmed.char_indices().find_map(|(index, character)| {
+        if character == open {
+            depth += 1;
+        } else if character == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+        None
+    });
+    if closed_at != Some(trimmed.len() - close.len_utf8()) {
         return trimmed.to_string();
     }
     trimmed[open.len_utf8()..trimmed.len() - close.len_utf8()]
@@ -750,6 +765,25 @@ fn set_syllables(line: &mut LineInfo, items: Vec<SyllableItem>) {
     }
 }
 
+/// 返回这一行唱完的时刻：逐词计时的行取最后一个词的结束时间，否则取行时间。
+///
+/// QRC、KRC 行头写的是这一行该显示多久，可以比最后一个词晚十几秒；回声与续句问的是
+/// 前一行什么时候唱完，拿行头时间比会把后面几秒内的行都算作紧接着它。
+fn sung_until_ms(line: &LineInfo) -> i32 {
+    if is_word_timed(line) {
+        let start = line.start_time().unwrap_or_default();
+        return line
+            .syllables()
+            .unwrap_or_default()
+            .iter()
+            .map(SyllableItem::end_time)
+            .max()
+            .unwrap_or(start)
+            .max(start);
+    }
+    latest_time_ms(line)
+}
+
 /// 返回这一行是否带逐词时间。
 fn is_word_timed(line: &LineInfo) -> bool {
     line.syllables()
@@ -885,7 +919,7 @@ fn continues(first: &LineInfo, tail: &LineInfo) -> bool {
 /// 那是这句吟唱的另一行而不是它的续句。只有行级时间的那一行关于它写下的后一行什么都没说，
 /// 那就只看大小写。
 fn follows_flush(first: &LineInfo, tail: &LineInfo) -> bool {
-    let ends_at = latest_time_ms(first);
+    let ends_at = sung_until_ms(first);
     if ends_at == first.start_time().unwrap_or_default() {
         return true;
     }
@@ -1447,6 +1481,33 @@ mod tests {
             "落单的括号是文本的一部分"
         );
         assert_eq!(unwrap_brackets("("), "(");
+        assert_eq!(
+            unwrap_brackets("(来吧)(尽管)"),
+            "(来吧)(尽管)",
+            "两段括号不是一段"
+        );
+        assert_eq!(unwrap_brackets("((来吧) 尽管)"), "(来吧) 尽管");
+    }
+
+    #[test]
+    fn a_label_naming_a_performer_whose_name_holds_a_separator() {
+        let mut lines = vec![
+            line(0, Some(500), "Tyler, The Creator：", Vec::new()),
+            line(1_000, Some(2_000), "Yeah", Vec::new()),
+            line(
+                2_000,
+                Some(2_500),
+                "Kali Uchis & Tyler, The Creator：",
+                Vec::new(),
+            ),
+            line(3_000, Some(4_000), "Together", Vec::new()),
+        ];
+
+        apply_speaker_labels(&mut lines, &artists(&["Kali Uchis", "Tyler, The Creator"]));
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].alignment(), LyricsAlignment::Right);
+        assert_eq!(lines[1].alignment(), LyricsAlignment::Left);
     }
 
     #[test]
@@ -1752,6 +1813,31 @@ mod tests {
         merge_continued_lines(&mut lines);
 
         assert_eq!(lines.len(), 2, "两行是副歌，不是一句话");
+    }
+
+    #[test]
+    fn the_display_time_in_a_line_header_does_not_join_the_rows_after_it() {
+        // QQ 音乐的行头写这一行该显示多久，可以比最后一个词晚十几秒；续句看的是最后一个
+        // 词唱完的时刻，不是行头。
+        let mut first = word_timed_line(28_415, 29_417, "She a Whole Different Animal");
+        set_end_time(&mut first, Some(40_000));
+        let mut lines = vec![first, word_timed_line(29_953, 30_779, "different animal")];
+
+        merge_continued_lines(&mut lines);
+
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn the_display_time_in_a_line_header_does_not_widen_the_echo_window() {
+        let mut parent = word_timed_line(0, 1_000, "Know that I will find");
+        set_end_time(&mut parent, Some(20_000));
+        let mut lines = vec![parent, word_timed_line(10_000, 11_000, "(far away)")];
+
+        fold_bracketed_echoes(&mut lines);
+
+        assert_eq!(lines.len(), 2, "十秒之后的括号句不是这一行的回声");
+        assert!(lines[0].sub_line().is_none());
     }
 
     #[test]

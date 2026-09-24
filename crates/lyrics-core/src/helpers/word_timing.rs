@@ -7,7 +7,7 @@
 //!
 //! 三条语义：
 //!
-//! 1. 行按开始时间顺序配对，相差不超过 1000 毫秒；
+//! 1. 行按开始时间顺序配对，相差不超过 1000 毫秒，容差内有几行时取最近的一行；
 //! 2. 每个词吃掉转录里「到它最后一个词字符为止」的字符，分隔符写在前一个词的末尾而不是
 //!    后一个词的开头，因此一行的词拼起来精确等于该行原文；
 //! 3. 对不齐就整行放弃：保留原有行时间、不带词时间。全有或全无——贴错的词时间比没有词
@@ -28,9 +28,10 @@ const ROW_TOLERANCE_MS: i32 = 1_000;
 ///
 /// `lines` 是已解析的行级转录，`word_lines` 是同一首歌的逐词计时文档（如 YRC）。逐词
 /// 文档给每个词计时，但它拼词用的文字是时间表而不是给人读的转录；因此保留转录的文字、
-/// 只取逐词文档的时间：两份文档按开始时间顺序配对，相差不超过 1000 毫秒才算同一行，且
-/// 每个逐词行只配一次。读不上的一行——逐词文档没有的那句旁白、它打码而转录写全的那个
-/// 词——保持原样：留下原有的行时间、不带词时间。全有或全无，绝不部分贴合。
+/// 只取逐词文档的时间：两份文档按开始时间顺序配对，相差不超过 1000 毫秒才算同一行，容差
+/// 内有几行时取开始时间最近的一行，且每个逐词行只配一次。读不上的一行——逐词文档没有的
+/// 那句旁白、它打码而转录写全的那个词——保持原样：留下原有的行时间、不带词时间。全有或
+/// 全无，绝不部分贴合。
 ///
 /// 配上词的行改成音节行（`Line` / `FullLine` 变为 `Syllable` / `FullSyllable`），文本由
 /// 音节推导且精确等于该行原文；行时间、对齐方式、子行与翻译/拼音原样保留。合并音节
@@ -81,29 +82,40 @@ pub fn apply_word_timings(lines: &mut [LineInfo], word_lines: &[LineInfo]) {
             continue;
         };
 
-        // 走掉配不上的逐词行，停在候选上。没有词（音节）的行给不出词时间；没有开始时间的
-        // 行配不上任何行；开始时间早于本行超过一个容差的行也配不上——两份文档都按开始
-        // 时间排序，跳过它们不会漏掉后面的行。
-        let mut candidate = None;
-        while let Some(word_line) = word_lines.get(next_word_line) {
-            match (word_line.syllables(), word_line.start_time()) {
-                (Some(words), Some(word_start))
-                    if !words.is_empty() && word_start + ROW_TOLERANCE_MS >= line_start =>
-                {
-                    candidate = Some((words, word_start));
-                    break;
-                }
-                _ => next_word_line += 1,
-            }
+        // 走掉开始时间早于本行超过一个容差的逐词行——两份文档都按开始时间排序，跳过它们
+        // 不会漏掉后面的行。
+        while word_lines.get(next_word_line).is_some_and(|word_line| {
+            word_timed_start(word_line).is_none_or(|start| start + ROW_TOLERANCE_MS < line_start)
+        }) {
+            next_word_line += 1;
         }
-        let Some((word_words, word_start)) = candidate else {
+        if next_word_line == word_lines.len() {
             return;
-        };
-
-        // 离得太远：这一行不带词时间，逐词行留给后面的行——它可能配得上后面的某一行。
-        if word_start.abs_diff(line_start) > ROW_TOLERANCE_MS as u32 {
-            continue;
         }
+
+        // 容差内可能有好几行：取开始时间最近的那一行。前一行没配上时它的逐词行还留着，
+        // 行距短于容差时它也落在本行的容差内，只取第一个候选会让本行去对前一行的词，
+        // 而且一行接一行地错下去。
+        let Some((index, word_words)) = word_lines[next_word_line..]
+            .iter()
+            .enumerate()
+            .map_while(|(offset, word_line)| {
+                let start = word_timed_start(word_line);
+                (start.is_none_or(|start| start <= line_start + ROW_TOLERANCE_MS)).then_some((
+                    next_word_line + offset,
+                    word_line,
+                    start,
+                ))
+            })
+            .filter_map(|(index, word_line, start)| {
+                Some((index, word_line.syllables()?, start?.abs_diff(line_start)))
+            })
+            .min_by_key(|(_, _, distance)| *distance)
+            .map(|(index, words, _)| (index, words))
+        else {
+            // 离得太远：这一行不带词时间，逐词行留给后面的行——它可能配得上后面的某一行。
+            continue;
+        };
 
         let Some(syllables) = read_words_onto(&line.text_from_any(), word_words) else {
             // 两份文档说的不是同一批词：整行放弃。
@@ -113,8 +125,16 @@ pub fn apply_word_timings(lines: &mut [LineInfo], word_lines: &[LineInfo]) {
         // 原地换变体：先取出整行，避免深拷贝音节与子行。
         let owned = std::mem::replace(line, LineInfo::new_line_simple(String::new()));
         *line = with_words(owned, syllables);
-        next_word_line += 1;
+        next_word_line = index + 1;
     }
+}
+
+/// 逐词行的开始时间；没有词（音节）或没有开始时间的行给不出词时间，返回 `None`。
+fn word_timed_start(word_line: &LineInfo) -> Option<i32> {
+    word_line
+        .syllables()
+        .filter(|words| !words.is_empty())
+        .and(word_line.start_time())
 }
 
 /// 把对齐好的词写到行上，保留行时间、对齐方式、子行与翻译/拼音。
@@ -451,6 +471,41 @@ mod tests {
 
         assert_eq!(words_of(&lines[0])[0].0, 90);
         assert_eq!(words_of(&lines[1]), vec![(2_370, "Second row".to_string())]);
+    }
+
+    /// 行距短于容差时，没配上的那一行留下的逐词行不能拖住后面的行。
+    #[test]
+    fn a_row_that_does_not_align_leaves_the_close_rows_after_it_alone() {
+        let mut lines = vec![
+            row(0, 800, "f*** you"),
+            row(800, 1_600, "go away"),
+            row(1_600, 2_400, "right now"),
+        ];
+        let word_lines = vec![
+            word_row(0, &[(0, 400, "fuck "), (400, 800, "you")]),
+            word_row(800, &[(800, 1_200, "go "), (1_200, 1_600, "away")]),
+            word_row(1_600, &[(1_600, 2_000, "right "), (2_000, 2_400, "now")]),
+        ];
+
+        apply_word_timings(&mut lines, &word_lines);
+
+        assert!(lines[0].syllables().is_none());
+        assert_eq!(words_of(&lines[1])[0].0, 800);
+        assert_eq!(words_of(&lines[2])[0].0, 1_600);
+    }
+
+    /// 容差内有好几行逐词行时配开始时间最近的那一行。
+    #[test]
+    fn pairs_the_nearest_word_row_within_the_tolerance() {
+        let mut lines = vec![row(500, 1_000, "Second row")];
+        let word_lines = vec![
+            word_row(0, &[(0, 500, "First row")]),
+            word_row(520, &[(520, 1_000, "Second row")]),
+        ];
+
+        apply_word_timings(&mut lines, &word_lines);
+
+        assert_eq!(words_of(&lines[0])[0].0, 520);
     }
 
     /// 相差正好 1000 毫秒仍算同一行。
